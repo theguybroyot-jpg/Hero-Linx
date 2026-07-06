@@ -1,0 +1,155 @@
+/* Hero Linx Starter CSS */
+
+*{
+    margin:0;
+    padding:0;
+    box-sizing:border-box;
+    font-family:Arial, Helvetica, sans-serif;
+}
+
+body{
+    background:linear-gradient(-45deg,#0b1025,#1d4ed8,#312e81,#111827);
+    background-size:400% 400%;
+    animation:bgMove 15s ease infinite;
+    color:white;
+    overflow-x:hidden;
+}
+
+/* Animated Background */
+
+@keyframes bgMove{
+    0%{background-position:0% 50%;}
+    50%{background-position:100% 50%;}
+    100%{background-position:0% 50%;}
+}
+
+/* Stars */
+
+#stars{
+    position:fixed;
+    width:100%;
+    height:100%;
+    top:0;
+    left:0;
+    background-image:
+    radial-gradient(white 1px, transparent 1px),
+    radial-gradient(#7dd3fc 1px, transparent 1px);
+    background-size:40px 40px,70px 70px;
+    opacity:.3;
+    pointer-events:none;
+    z-index:-1;
+}
+
+/* Menu Button */
+
+#menuBtn{
+    position:fixed;
+    top:15px;
+    left:15px;
+    font-size:30px;
+    border:none;
+    background:rgba(255,255,255,.12);
+    color:white;
+    width:55px;
+    height:55px;
+    border-radius:12px;
+    cursor:pointer;
+    transition:.3s;
+    backdrop-filter:blur(10px);
+}
+
+#menuBtn:hover{
+    transform:scale(1.08);
+}
+
+/* Sidebar */
+
+#sidebar{
+    position:fixed;
+    top:0;
+    left:-260px;
+    width:250px;
+    height:100%;
+    background:#111827;
+    transition:.35s;
+    padding-top:80px;
+    box-shadow:6px 0 20px rgba(0,0,0,.4);
+}
+
+#sidebar.open{
+    left:0;
+}
+
+#sidebar h2{
+    text-align:center;
+    margin-bottom:30px;
+}
+
+#sidebar a{
+    display:block;
+    color:white;
+    text-decoration:none;
+    padding:18px 25px;
+    transition:.25s;
+}
+
+#sidebar a:hover{
+    background:#1e3a8a;
+    padding-left:35px;
+}
+
+/* Hero */
+
+.hero{
+    min-height:100vh;
+    display:flex;
+    flex-direction:column;
+    justify-content:center;
+    align-items:center;
+    text-align:center;
+    padding:20px;
+}
+
+.hero h1{
+    font-size:70px;
+    margin-bottom:15px;
+}
+
+.hero p{
+    opacity:.8;
+    margin-bottom:25px;
+}
+
+#search{
+    width:min(550px,90%);
+    padding:16px;
+    border:none;
+    border-radius:40px;
+    font-size:18px;
+    outline:none;
+}
+
+/* Cards */
+
+.cards{
+    display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
+    gap:25px;
+    width:90%;
+    max-width:1100px;
+    margin-top:60px;
+}
+
+.card{
+    background:rgba(255,255,255,.08);
+    padding:35px;
+    border-radius:18px;
+    backdrop-filter:blur(12px);
+    transition:.3s;
+    cursor:pointer;
+}
+
+.card:hover{
+    transform:translateY(-8px);
+    box-shadow:0 0 20px #60a5fa;
+}
