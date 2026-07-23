@@ -5,7 +5,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-<title>Loading Movie...</title>
+<title>Movies</title>
 
 <style>
 
@@ -431,7 +431,7 @@ allowfullscreen>
 
 <script>
 
-const API_KEY="YOUR_TMDB_API_KEY";
+const API_KEY="bb33aa47807eec85db1687412383c855";
 
 const params=new URLSearchParams(location.search);
 
@@ -452,7 +452,7 @@ document.getElementById("player").src=
 async function loadMovie(){
 
 const response=
-await fetch(`https://api.themoviedb.org/3/find/${imdb}?api_key=${API_KEY}&external_source=imdb_id`
+await fetch(`https://api.themoviedb.org/3/find/${imdb}?api_key=${bb33aa47807eec85db1687412383c855}&external_source=imdb_id`
 
 );
 
@@ -497,7 +497,7 @@ const detailsResponse=
 
 await fetch(
 
-`https://api.themoviedb.org/3/movie/${movie.id}?api_key=${API_KEY}`
+`https://api.themoviedb.org/3/movie/${movie.id}?api_key=${bb33aa47807eec85db1687412383c855}`
 
 );
 
@@ -603,7 +603,7 @@ const response=
 
 await fetch(
 
-`https://api.themoviedb.org/3/movie/${imdb}?api_key=${API_KEY}`
+`https://api.themoviedb.org/3/movie/${imdb}?api_key=${bb33aa47807eec85db1687412383c855}`
 
 );
 
@@ -720,7 +720,7 @@ const response=
 
 await fetch(
 
-`https://api.themoviedb.org/3/movie/${imdb}/similar?api_key=${API_KEY}&language=en-US&page=1`
+`https://api.themoviedb.org/3/movie/${imdb}/similar?api_key=${bb33aa47807eec85db1687412383c855}&language=en-US&page=1`
 
 );
 
@@ -777,7 +777,7 @@ const response=
 
 await fetch(
 
-`https://api.themoviedb.org/3/movie/${imdb}/credits?api_key=${API_KEY}`
+`https://api.themoviedb.org/3/movie/${imdb}/credits?api_key=${bb33aa47807eec85db1687412383c855}`
 
 );
 
@@ -855,7 +855,7 @@ const response=
 
 await fetch(
 
-`https://api.themoviedb.org/3/movie/${imdb}/videos?api_key=${API_KEY}&language=en-US`
+`https://api.themoviedb.org/3/movie/${imdb}/videos?api_key=${bb33aa47807eec85db1687412383c855}&language=en-US`
 
 );
 
