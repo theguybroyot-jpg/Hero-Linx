@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<title>Stranger Things</title>
+
+<style>
+
+*{
+margin:0;
+padding:0;
+box-sizing:border-box;
+font-family:Arial,Helvetica,sans-serif;
+}
+
+body{
+background:#090909;
+color:white;
+}
+
+header{
+background:#111;
+padding:20px;
+text-align:center;
+font-size:32px;
+font-weight:bold;
+}
+
+.player{
+width:100%;
+height:70vh;
+background:black;
+}
+
+iframe{
+width:100%;
+height:100%;
+border:none;
+}
+
+.controls{
+display:flex;
+justify-content:center;
+align-items:center;
+gap:20px;
+padding:30px;
+flex-wrap:wrap;
+background:#111;
+}
+
+label{
+font-size:20px;
+}
+
+select{
+padding:10px 20px;
+font-size:18px;
+border:none;
+border-radius:10px;
+background:#222;
+color:white;
+}
+
+button{
+padding:12px 25px;
+font-size:18px;
+border:none;
+border-radius:10px;
+background:#c62828;
+color:white;
+cursor:pointer;
+}
+
+button:hover{
+background:#e53935;
+}
+
+.info{
+padding:30px;
+max-width:900px;
+margin:auto;
+}
+
+</style>
+
+</head>
+
+<body>
+
+<header>
+
+Stranger Things
+
+</header>
+
+<div class="player">
+
+<iframe
+id="player"
+src="https://vidsrc.mov/embed/tv/tt4574334/1/1"
+allowfullscreen>
+</iframe>
+
+</div>
+
+<div class="controls">
+
+<label>
+
+Season
+
+<select id="season">
+
+<option>1</option>
+<option>2</option>
+<option>3</option>
+<option>4</option>
+<option>5</option>
+
+</select>
+
+</label>
+
+<label>
+
+Episode
+
+<select id="episode">
+
+</select>
+
+</label>
+
+<button onclick="loadEpisode()">
+
+Watch
+
+</button>
+
+</div>
+
+<div class="info">
+
+<h2>Stranger Things</h2>
+
+<p>
+When a young boy vanishes, a group of friends uncover secret experiments, supernatural forces, and a mysterious girl with extraordinary powers in the town of Hawkins.
+</p>
+
+</div>
+
+<script>
+
+const episodeCounts = {
+1: 8,
+2: 9,
+3: 8,
+4: 9,
+5: 8
+};
+
+const seasonSelect = document.getElementById("season");
+const episodeSelect = document.getElementById("episode");
+
+function fillEpisodes(){
+
+const season = seasonSelect.value;
+const count = episodeCounts[season];
+
+episodeSelect.innerHTML = "";
+
+for(let i = 1; i <= count; i++){
+
+episodeSelect.innerHTML += `<option>${i}</option>`;
+
+}
+
+}
+
+seasonSelect.addEventListener("change", fillEpisodes);
+
+fillEpisodes();
+
+function loadEpisode(){
+
+const season = seasonSelect.value;
+const episode = episodeSelect.value;
+
+document.getElementById("player").src =
+`https://vidsrc.mov/embed/tv/tt4574334/${season}/${episode}`;
+
+}
+
+</script>
+
+</body>
+</html>
