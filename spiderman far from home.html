@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<title>Spider-Man: Far From Home</title>
+
+<style>
+
+*{
+margin:0;
+padding:0;
+box-sizing:border-box;
+font-family:Arial,Helvetica,sans-serif;
+}
+
+body{
+background:#090909;
+color:white;
+}
+
+header{
+
+background:#111;
+
+padding:20px;
+
+display:flex;
+
+justify-content:space-between;
+
+align-items:center;
+
+flex-wrap:wrap;
+
+gap:15px;
+
+}
+
+.left{
+
+display:flex;
+
+align-items:center;
+
+gap:15px;
+
+}
+
+.back{
+
+padding:10px 20px;
+
+background:#c62828;
+
+color:white;
+
+text-decoration:none;
+
+border-radius:8px;
+
+transition:.3s;
+
+}
+
+.back:hover{
+
+background:#e53935;
+
+}
+
+.title{
+
+font-size:30px;
+
+font-weight:bold;
+
+}
+
+.fullscreen{
+
+padding:10px 20px;
+
+background:#2979ff;
+
+color:white;
+
+border:none;
+
+border-radius:8px;
+
+font-size:16px;
+
+cursor:pointer;
+
+transition:.3s;
+
+}
+
+.fullscreen:hover{
+
+background:#5393ff;
+
+}
+
+.player{
+
+width:100%;
+
+height:75vh;
+
+background:black;
+
+}
+
+iframe{
+
+width:100%;
+
+height:100%;
+
+border:none;
+
+}
+
+.info{
+
+padding:30px;
+
+max-width:900px;
+
+margin:auto;
+
+line-height:1.6;
+
+}
+
+</style>
+
+</head>
+
+<body>
+
+<header>
+
+<div class="left">
+
+<a href="movies.html" class="back">← Back to Movies</a>
+
+<div class="title">
+
+Spider-Man: Far From Home
+
+</div>
+
+</div>
+
+<button class="fullscreen" onclick="goFullscreen()">
+
+⛶ Fullscreen
+
+</button>
+
+</header>
+
+<div class="player" id="playerContainer">
+
+<iframe
+
+src="https://vidsrc.mov/embed/movie/tt6320628"
+
+allowfullscreen
+
+id="player">
+
+</iframe>
+
+</div>
+
+<div class="info">
+
+<h2>Spider-Man: Far From Home</h2>
+
+<p>
+
+Peter Parker joins his classmates on a trip across Europe, but his vacation is interrupted when Nick Fury recruits him to battle mysterious elemental creatures alongside the enigmatic Mysterio.
+
+</p>
+
+</div>
+
+<script>
+
+function goFullscreen(){
+
+const player=document.getElementById("playerContainer");
+
+if(player.requestFullscreen){
+
+player.requestFullscreen();
+
+}else if(player.webkitRequestFullscreen){
+
+player.webkitRequestFullscreen();
+
+}else if(player.msRequestFullscreen){
+
+player.msRequestFullscreen();
+
+}
+
+}
+
+</script>
+
+</body>
+
+</html>
