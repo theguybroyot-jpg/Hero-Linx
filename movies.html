@@ -5,7 +5,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-<title>Movies</title>
+<title>Movie</title>
 
 <style>
 
@@ -16,120 +16,59 @@ box-sizing:border-box;
 font-family:Arial,Helvetica,sans-serif;
 }
 
-html{
-scroll-behavior:smooth;
-}
-
 body{
-
 background:#090909;
 color:white;
-overflow-x:hidden;
-
 }
 
-/* Animated Background */
+.loading{
 
-body::before{
-
-content:"";
 position:fixed;
-left:0;
-top:0;
-width:100%;
-height:100%;
-
-background:
-radial-gradient(circle,#ffffff11 1px,transparent 1px);
-
-background-size:45px 45px;
-
-animation:bgMove 30s linear infinite;
-
-z-index:-3;
+inset:0;
+background:#090909;
+display:flex;
+justify-content:center;
+align-items:center;
+font-size:32px;
+z-index:9999;
 
 }
 
-@keyframes bgMove{
-
-from{
-
-transform:translateY(0);
-
+.loading.hidden{
+display:none;
 }
 
-to{
-
-transform:translateY(45px);
-
-}
-
-}
-
-/* Hero */
 
 .hero{
 
-position:relative;
-
-height:70vh;
-
-display:flex;
-
-align-items:flex-end;
-
+min-height:70vh;
 padding:50px;
+display:flex;
+align-items:end;
 
 background-size:cover;
-
 background-position:center;
 
 }
 
-.hero::after{
-
-content:"";
-
-position:absolute;
-
-left:0;
-top:0;
-width:100%;
-height:100%;
-
-background:
-
-linear-gradient(to top,#090909 0%,rgba(9,9,9,.25));
-
-}
 
 .heroContent{
 
-position:relative;
-
-z-index:2;
-
 display:flex;
-
 gap:30px;
-
-align-items:flex-end;
-
+align-items:end;
 flex-wrap:wrap;
 
 }
 
+
 .poster{
 
 width:230px;
-
-border-radius:14px;
-
-box-shadow:
-
-0 0 35px black;
+border-radius:15px;
 
 }
+
 
 .details{
 
@@ -137,227 +76,134 @@ max-width:700px;
 
 }
 
+
 .details h1{
 
-font-size:58px;
-
+font-size:55px;
 margin-bottom:15px;
 
 }
+
 
 .meta{
 
 display:flex;
-
 gap:20px;
-
 flex-wrap:wrap;
-
-margin-bottom:15px;
-
-color:#dddddd;
-
-font-size:18px;
+margin-bottom:20px;
 
 }
+
 
 .overview{
 
-font-size:19px;
-
-line-height:1.7;
-
-color:#eeeeee;
+font-size:18px;
+line-height:1.6;
 
 }
 
-/* Buttons */
-
-.buttons{
-
-margin-top:30px;
-
-display:flex;
-
-gap:15px;
-
-flex-wrap:wrap;
-
-}
 
 .button{
 
-padding:14px 24px;
-
-border-radius:10px;
-
-text-decoration:none;
-
-color:white;
-
-font-size:18px;
-
-cursor:pointer;
-
-border:none;
-
-transition:.25s;
-
-}
-
-.watch{
-
-background:#d62828;
-
-}
-
-.watch:hover{
-
-background:#ef4444;
-
-}
-
-.back{
-
+padding:14px 25px;
 background:#333;
+color:white;
+border:0;
+border-radius:10px;
+cursor:pointer;
+margin-top:20px;
 
 }
 
-.back:hover{
-
-background:#555;
-
-}
-
-.full{
-
-background:#1f6fff;
-
-}
-
-.full:hover{
-
-background:#3b82f6;
-
-}
-
-/* Player */
-
-.playerSection{
-
-padding:30px;
-
-}
 
 .player{
 
-width:100%;
-
-height:78vh;
-
-border-radius:16px;
-
+height:70vh;
+margin:30px;
+background:black;
+border-radius:15px;
 overflow:hidden;
 
-box-shadow:0 0 35px black;
-
 }
+
 
 .player iframe{
 
 width:100%;
-
 height:100%;
-
-border:none;
-
-background:black;
+border:0;
 
 }
 
-/* Loading */
 
-.loading{
-
-position:fixed;
-
-left:0;
-top:0;
-
-width:100%;
-height:100%;
-
-background:#090909;
-
-display:flex;
-
-justify-content:center;
-
-align-items:center;
-
-font-size:32px;
-
-z-index:9999;
-
-}
-
-.loading.hidden{
-
-display:none;
-
-}
-
-/* Mobile */
-
-@media(max-width:850px){
-
-.hero{
-
-height:auto;
+.section{
 
 padding:30px;
 
 }
 
-.poster{
 
-width:180px;
+.cards{
 
-}
-
-.details h1{
-
-font-size:38px;
+display:flex;
+gap:20px;
+overflow-x:auto;
 
 }
 
-.player{
 
-height:55vh;
+.card{
+
+min-width:160px;
+background:#151515;
+padding:10px;
+border-radius:12px;
+cursor:pointer;
 
 }
 
+
+.card img{
+
+width:100%;
+border-radius:10px;
+
 }
+
+
+.card p{
+
+margin-top:10px;
+
+}
+
 
 </style>
 
 </head>
 
+
 <body>
 
-<div class="loading" id="loading">
+
+<div id="loading" class="loading">
 
 Loading Movie...
 
 </div>
 
+
 <div class="hero" id="hero">
+
 
 <div class="heroContent">
 
-<img class="poster" id="poster">
+
+<img id="poster" class="poster">
+
 
 <div class="details">
+
 
 <h1 id="title">
 
@@ -365,526 +211,187 @@ Loading...
 
 </h1>
 
+
 <div class="meta">
 
-<div id="year"></div>
+<span id="year"></span>
 
-<div id="runtime"></div>
+<span id="rating"></span>
 
-<div id="rating"></div>
+<span id="runtime"></span>
 
 </div>
 
-<p class="overview" id="overview">
 
-Loading movie...
+<p id="overview" class="overview">
 
 </p>
 
-<div class="buttons">
 
-<a href="movies.html" class="button back">
+<button class="button" onclick="scrollToPlayer()">
 
-⬅ Back
-
-</a>
-
-<button
-class="button watch"
-onclick="scrollToPlayer()">
-
-▶ Watch Now
+▶ Watch Trailer
 
 </button>
 
-<button
-class="button full"
-onclick="fullscreenPlayer()">
-
-⛶ Fullscreen
-
-</button>
 
 </div>
 
-</div>
 
 </div>
 
-</div>
-
-<div class="playerSection">
-
-<div
-class="player"
-id="playerContainer">
-
-<iframe
-id="player"
-allowfullscreen>
-
-</iframe>
 
 </div>
 
+
+<div class="player" id="playerContainer">
+
+<iframe id="player" allowfullscreen></iframe>
+
 </div>
 
-<script>
 
-const API_KEY="bb33aa47807eec85db1687412383c855";
+<div class="section">
 
-const params=new URLSearchParams(location.search);
+<h2>Recommended Movies</h2>
 
-const imdb=params.get("id");
+<div id="recommendations" class="cards"></div>
 
-if(!imdb){
+</div>
 
-document.body.innerHTML="<h1 style='padding:40px;'>Missing IMDb ID.</h1>";
 
-throw "";
+<div class="section">
+
+<h2>Trailer</h2>
+
+<div id="trailer"></div>
+
+</div><script>
+
+const API_KEY = "bb33aa47807eec85db1687412383c855";
+
+
+const movieID = new URLSearchParams(window.location.search).get("id");
+
+
+if(!movieID){
+
+document.body.innerHTML = 
+"<h1 style='padding:40px'>Missing Movie ID</h1>";
+
+throw new Error("Missing movie ID");
 
 }
 
-document.getElementById("player").src=
 
-`https://vidsrc.mov/embed/movie/${imdb}`;
 
 async function loadMovie(){
 
-const response=
-await fetch(`https://api.themoviedb.org/3/find/${imdb}?api_key=${bb33aa47807eec85db1687412383c855}&external_source=imdb_id`
-
-);
-
-const data = await response.json();
-
-if(!data.movie_results.length){
-
-document.getElementById("loading").innerHTML="Movie Not Found";
-
-return;
-
-}
-
-const movie=data.movie_results[0];
-
-document.title=movie.title;
-
-document.getElementById("title").innerHTML=movie.title;
-
-document.getElementById("poster").src=
-
-"https://image.tmdb.org/t/p/w500"+movie.poster_path;
-
-document.getElementById("overview").innerHTML=
-
-movie.overview;
-
-document.getElementById("year").innerHTML=
-
-"📅 "+movie.release_date;
-
-document.getElementById("rating").innerHTML=
-
-"⭐ "+movie.vote_average.toFixed(1)+"/10";
-
-document.getElementById("hero").style.backgroundImage=
-
-`linear-gradient(rgba(0,0,0,.35),rgba(0,0,0,.85)),
-url(https://image.tmdb.org/t/p/original${movie.backdrop_path})`;
-
-const detailsResponse=
-
-await fetch(
-
-`https://api.themoviedb.org/3/movie/${movie.id}?api_key=${bb33aa47807eec85db1687412383c855}`
-
-);
-
-const details=
-
-await detailsResponse.json();
-
-const hours=Math.floor(details.runtime/60);
-
-const minutes=details.runtime%60;
-
-document.getElementById("runtime").innerHTML=
-
-"⏱ "+hours+"h "+minutes+"m";
-
-const loading=
-
-document.getElementById("loading");
-
-loading.classList.add("hidden");
-
-}
-
-loadMovie();
-
-function scrollToPlayer(){
-
-document.getElementById("playerContainer")
-
-.scrollIntoView({
-
-behavior:"smooth"
-
-});
-
-}
-
-function fullscreenPlayer(){
-
-const player=
-
-document.getElementById("playerContainer");
-
-if(player.requestFullscreen){
-
-player.requestFullscreen();
-
-}
-
-else if(player.webkitRequestFullscreen){
-
-player.webkitRequestFullscreen();
-
-}
-
-else if(player.msRequestFullscreen){
-
-player.msRequestFullscreen();
-
-}
-
-}document.getElementById("poster").onerror=function(){
-
-this.src="https://placehold.co/500x750/111111/ffffff?text=No+Poster";
-
-};
-
-window.addEventListener("keydown",function(e){
-
-if(e.key==="f"){
-
-fullscreenPlayer();
-
-}
-
-if(e.key==="Escape"){
-
-document.exitFullscreen();
-
-}
-
-});
-
-document.getElementById("player").addEventListener("load",function(){
-
-console.log("Player Loaded");
-
-});
-
-function formatDate(date){
-
-if(!date)return "Unknown";
-
-const d=new Date(date);
-
-return d.toLocaleDateString();
-
-}
-
-async function loadExtra(){
-
-const response=
-
-await fetch(
-
-`https://api.themoviedb.org/3/movie/${imdb}?api_key=${bb33aa47807eec85db1687412383c855}`
-
-);
-
-const movie=
-
-await response.json();
-
-if(movie.genres){
-
-const genres=
-
-movie.genres.map(g=>g.name).join(" • ");
-
-const genre=document.createElement("div");
-
-genre.className="meta";
-
-genre.innerHTML="🎭 "+genres;
-
-document.querySelector(".details")
-
-.appendChild(genre);
-
-}
-
-if(movie.tagline){
-
-const tag=document.createElement("h3");
-
-tag.style.marginTop="25px";
-
-tag.style.color="#ffffff";
-
-tag.innerHTML=movie.tagline;
-
-document.querySelector(".details")
-
-.appendChild(tag);
-
-}
-
-}
-
-loadExtra();
-
-window.addEventListener("load",()=>{
-
-document.getElementById("loading")
-
-.classList.add("hidden");
-
-});
-
-window.addEventListener("resize",()=>{
-
-const player=
-
-document.getElementById("playerContainer");
-
-if(window.innerWidth<700){
-
-player.style.height="55vh";
-
-}else{
-
-player.style.height="78vh";
-
-}
-
-});<script>
-
-function createRecommendationCard(movie){
-
-const card=document.createElement("div");
-
-card.className="movie-card";
-
-card.innerHTML=`
-
-<img src="${
-movie.poster_path
-?
-"https://image.tmdb.org/t/p/w500"+movie.poster_path
-:
-"https://placehold.co/500x750/111111/ffffff?text=No+Poster"
-}">
-
-<h3>${movie.title || movie.name}</h3>
-
-<div class="rating">
-⭐ ${movie.vote_average ? movie.vote_average.toFixed(1) : "N/A"}
-</div>
-
-`;
-
-card.onclick=function(){
-
-window.location.href=
-"movie.html?id="+movie.id;
-
-};
-
-return card;
-
-}
-
-
-
-async function loadRecommendations(){
 
 try{
 
-const response=
 
-await fetch(
+const response = await fetch(
 
-`https://api.themoviedb.org/3/movie/${imdb}/similar?api_key=${bb33aa47807eec85db1687412383c855}&language=en-US&page=1`
-
-);
-
-
-const data=
-
-await response.json();
-
-
-const container=
-
-document.getElementById("recommendations");
-
-
-if(!data.results)return;
-
-
-data.results.slice(0,12).forEach(movie=>{
-
-container.appendChild(
-
-createRecommendationCard(movie)
-
-);
-
-});
-
-
-}
-
-catch(error){
-
-console.log(
-"Recommendation error:",
-error
-);
-
-}
-
-}
-
-
-loadRecommendations();
-
-
-
-
-
-async function loadCast(){
-
-try{
-
-const response=
-
-await fetch(
-
-`https://api.themoviedb.org/3/movie/${imdb}/credits?api_key=${bb33aa47807eec85db1687412383c855}`
+`https://api.themoviedb.org/3/movie/${movieID}?api_key=${API_KEY}&append_to_response=videos`
 
 );
 
 
-const data=
 
-await response.json();
-
-
-const castContainer=
-
-document.getElementById("cast");
+const movie = await response.json();
 
 
-if(!data.cast)return;
+
+document.title = movie.title;
 
 
-data.cast.slice(0,10).forEach(person=>{
+
+document.getElementById("title").innerHTML =
+movie.title;
 
 
-const actor=document.createElement("div");
 
-actor.className="actor";
+document.getElementById("poster").src =
 
-
-actor.innerHTML=`
-
-<img src="${
-person.profile_path
-?
-"https://image.tmdb.org/t/p/w185"+person.profile_path
-:
-"https://placehold.co/185x278/111111/ffffff?text=No+Image"
-}">
+"https://image.tmdb.org/t/p/w500" + movie.poster_path;
 
 
-<p>${person.name}</p>
 
-<span>${person.character}</span>
+document.getElementById("overview").innerHTML =
 
+movie.overview || "No description available.";
+
+
+
+document.getElementById("year").innerHTML =
+
+"📅 " + movie.release_date;
+
+
+
+document.getElementById("rating").innerHTML =
+
+"⭐ " + movie.vote_average.toFixed(1) + "/10";
+
+
+
+let hours = Math.floor(movie.runtime / 60);
+
+let minutes = movie.runtime % 60;
+
+
+
+document.getElementById("runtime").innerHTML =
+
+"⏱ " + hours + "h " + minutes + "m";
+
+
+
+
+document.getElementById("hero").style.backgroundImage =
+
+`
+linear-gradient(
+rgba(0,0,0,.4),
+rgba(9,9,9,1)
+),
+url(
+https://image.tmdb.org/t/p/original${movie.backdrop_path}
+)
 `;
 
 
-castContainer.appendChild(actor);
-
-
-});
-
-
-}
-
-catch(error){
-
-console.log(
-"Cast loading failed",
-error
-);
-
-}
-
-}
-
-
-loadCast();
 
 
 
+// Trailer
 
 
-async function loadTrailer(){
+let trailer = movie.videos.results.find(video =>
 
-try{
-
-const response=
-
-await fetch(
-
-`https://api.themoviedb.org/3/movie/${imdb}/videos?api_key=${bb33aa47807eec85db1687412383c855}&language=en-US`
-
-);
-
-
-const data=
-
-await response.json();
-
-
-const trailer=
-
-data.results.find(video=>
-
-video.type==="Trailer"
+video.site === "YouTube"
 
 &&
 
-video.site==="YouTube"
+video.type === "Trailer"
 
 );
+
 
 
 if(trailer){
 
-document.getElementById("trailer")
 
-.innerHTML=`
+document.getElementById("trailer").innerHTML =
+
+`
 
 <iframe
+
+width="100%"
+
+height="400"
 
 src="https://www.youtube.com/embed/${trailer.key}"
 
@@ -897,97 +404,209 @@ allowfullscreen>
 }
 
 
+
+
+document.getElementById("loading")
+
+.classList.add("hidden");
+
+
+
+loadRecommendations();
+
+
+
+}
+
+
+
+catch(error){
+
+
+console.log(error);
+
+
+document.getElementById("loading").innerHTML =
+
+"Failed To Load Movie";
+
+
+}
+
+
+}
+
+
+
+
+
+
+async function loadRecommendations(){
+
+
+
+try{
+
+
+const response = await fetch(
+
+`https://api.themoviedb.org/3/movie/${movieID}/similar?api_key=${API_KEY}&language=en-US`
+
+);
+
+
+
+const data = await response.json();
+
+
+
+const container =
+
+document.getElementById("recommendations");
+
+
+
+data.results.slice(0,12).forEach(movie => {
+
+
+
+let card = document.createElement("div");
+
+
+card.className = "card";
+
+
+
+card.innerHTML =
+
+
+`
+
+<img src="
+
+${
+movie.poster_path
+
+?
+
+"https://image.tmdb.org/t/p/w300"+movie.poster_path
+
+:
+
+"https://placehold.co/300x450"
+
+}
+
+">
+
+
+<p>
+
+${movie.title}
+
+</p>
+
+`;
+
+
+
+card.onclick = function(){
+
+
+window.location.href =
+
+"movie.html?id=" + movie.id;
+
+
+};
+
+
+
+container.appendChild(card);
+
+
+
+});
+
+
+
 }
 
 catch(error){
 
 console.log(
-"Trailer error:",
+
+"Recommendation error",
+
 error
+
 );
-
-}
-
-}
-
-
-loadTrailer();
-
-
-
-
-
-function goBack(){
-
-history.back();
 
 }
 
 
 
-document.getElementById("backButton")
-
-.addEventListener(
-
-"click",
-
-goBack
-
-);
+}
 
 
 
 
 
-function shareMovie(){
+document.getElementById("poster").onerror=function(){
 
-navigator.share({
 
-title:
+this.src=
 
-document.title,
+"https://placehold.co/500x750/111111/ffffff?text=No+Poster";
 
-url:
 
-window.location.href
+};
 
-})
 
-.catch(()=>{
 
-navigator.clipboard.writeText(
 
-window.location.href
 
-);
+function scrollToPlayer(){
 
-alert(
 
-"Movie link copied!"
+document.getElementById("playerContainer")
 
-);
+.scrollIntoView({
+
+behavior:"smooth"
 
 });
 
+
 }
 
 
 
-document.getElementById("shareButton")
-
-.addEventListener(
-
-"click",
-
-shareMovie
-
-);
 
 
+function fullscreenPlayer(){
 
-</script>
+
+let player =
+
+document.getElementById("playerContainer");
 
 
-</body>
+
+if(player.requestFullscreen){
+
+player.requestFullscreen();
+
+}
+
+
+}
+
+
+
+loadMovie();
+
+
+</script> </body>
 
 </html>
