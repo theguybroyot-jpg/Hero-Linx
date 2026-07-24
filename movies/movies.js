@@ -11,7 +11,7 @@ let currentFilter = "all";
 async function getTMDB(imdb, type){
 
     const find = await fetch(
-        `https://api.themoviedb.org/3/find/${imdb}?api_key=${TMDB_API_KEY}&external_source=imdb_id`
+        `https://api.themoviedb.org/3/find/${imdb}?api_key=${bb33aa47807eec85db1687412383c855}&external_source=imdb_id`
     );
 
     const result = await find.json();
