@@ -113,7 +113,7 @@ if(trailer){
 
 
 player.src =
-`https://www.vidsrc.mov/embed/movie/${trailer.key}`;
+`https://www.vidsrc.mov/embed/tv/${trailer.key}`;
 
 
 }else{
