@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<title>Loading...</title>
+
+<link rel="stylesheet" href="movies.css">
+
+<style>
+
+.movieHero{
+
+min-height:65vh;
+
+display:flex;
+
+align-items:flex-end;
+
+padding:50px;
+
+background-size:cover;
+
+background-position:center;
+
+position:relative;
+
+}
+
+.movieHero::before{
+
+content:"";
+
+position:absolute;
+
+inset:0;
+
+background:linear-gradient(to top,#090909,rgba(0,0,0,.35));
+
+}
+
+.movieContent{
+
+position:relative;
+
+z-index:2;
+
+display:flex;
+
+gap:35px;
+
+align-items:flex-end;
+
+flex-wrap:wrap;
+
+}
+
+.moviePoster{
+
+width:240px;
+
+border-radius:15px;
+
+box-shadow:0 0 35px black;
+
+}
+
+.movieInfo{
+
+max-width:750px;
+
+}
+
+.movieInfo h1{
+
+font-size:56px;
+
+margin-bottom:15px;
+
+}
+
+.meta{
+
+display:flex;
+
+gap:18px;
+
+flex-wrap:wrap;
+
+margin:15px 0;
+
+color:#ddd;
+
+font-size:18px;
+
+}
+
+.description{
+
+font-size:19px;
+
+line-height:1.7;
+
+color:#eee;
+
+margin-top:20px;
+
+}
+
+.playerSection{
+
+padding:35px;
+
+}
+
+#playerContainer{
+
+width:100%;
+
+height:78vh;
+
+border-radius:15px;
+
+overflow:hidden;
+
+background:black;
+
+box-shadow:0 0 30px black;
+
+}
+
+#player{
+
+width:100%;
+
+height:100%;
+
+border:none;
+
+}
+
+.controls{
+
+display:flex;
+
+gap:15px;
+
+margin-top:30px;
+
+flex-wrap:wrap;
+
+}
+
+</style>
+
+</head>
+
+<body>
+
+<header>
+
+<div class="logo">
+
+🎬 Hero Linx Movies
+
+</div>
+
+<nav>
+
+<a href="index.html">
+
+Home
+
+</a>
+
+</nav>
+
+</header>
+
+<section
+class="movieHero"
+id="hero">
+
+<div class="movieContent">
+
+<img
+id="poster"
+class="moviePoster">
+
+<div class="movieInfo">
+
+<h1 id="title">
+
+Loading...
+
+</h1>
+
+<div
+class="meta"
+id="meta">
+
+Loading...
+
+</div>
+
+<p
+id="overview"
+class="description">
+
+Loading movie...
+
+</p>
+
+<div class="controls">
+
+<a
+href="index.html"
+class="button dark">
+
+⬅ Back
+
+</a>
+
+<button
+class="button red"
+onclick="scrollPlayer()">
+
+▶ Watch
+
+</button>
+
+<button
+class="button dark"
+onclick="fullscreenPlayer()">
+
+⛶ Fullscreen
+
+</button>
+
+</div>
+
+</div>
+
+</div>
+
+</section>
+
+<section class="playerSection">
+
+<div id="playerContainer">
+
+<iframe
+id="player"
+allowfullscreen>
+
+</iframe>
+
+</div>
+
+</section>
+
+<script>
+
+const API=TMDB_API_KEY;
+
+const params=new URLSearchParams(location.search);
+
+const imdb=params.get("id");
+
+if(!imdb){
+
+document.body.innerHTML="<h1 style='padding:40px'>Missing IMDb ID</h1>";
+
+throw "";
+
+}
+
+document.getElementById("player").src=
+
+`https://vidsrc.mov/embed/movie/${imdb}`;
+
+async function loadMovie(){
+
+const find=await fetch(
+
+`https://api.themoviedb.org/3/find/${imdb}?api_key=${API}&external_source=imdb_id`
+
+);
+
+const result=await find.json();
+
+const movie=result.movie_results[0];
+
+if(!movie){
+
+document.body.innerHTML="<h1 style='padding:40px'>Movie not found.</h1>";
+
+return;
+
+}
+
+const details=await fetch(
+
+`https://api.themoviedb.org/3/movie/${movie.id}?api_key=${API}`
+
+);
+
+const info=await details.json();
+
+document.title=info.title;
+
+document.getElementById("title").textContent=info.title;
+
+document.getElementById("poster").src=
+
+"https://image.tmdb.org/t/p/w500"+info.poster_path;
+
+document.getElementById("hero").style.backgroundImage=
+
+`linear-gradient(rgba(0,0,0,.35),rgba(0,0,0,.9)),url(https://image.tmdb.org/t/p/original${info.backdrop_path})`;
+
+document.getElementById("overview").textContent=
+
+info.overview;const genres = info.genres.map(g=>g.name).join(" • ");
+
+const runtimeHours=Math.floor(info.runtime/60);
+
+const runtimeMinutes=info.runtime%60;
+
+document.getElementById("meta").innerHTML=`
+
+⭐ ${info.vote_average.toFixed(1)}/10
+
+•
+
+📅 ${info.release_date}
+
+•
+
+⏱ ${runtimeHours}h ${runtimeMinutes}m
+
+•
+
+🎭 ${genres}
+
+`;
+
+}
+
+loadMovie();
+
+function scrollPlayer(){
+
+document.getElementById("playerContainer")
+
+.scrollIntoView({
+
+behavior:"smooth"
+
+});
+
+}
+
+function fullscreenPlayer(){
+
+const player=document.getElementById("playerContainer");
+
+if(player.requestFullscreen){
+
+player.requestFullscreen();
+
+}
+
+else if(player.webkitRequestFullscreen){
+
+player.webkitRequestFullscreen();
+
+}
+
+else if(player.msRequestFullscreen){
+
+player.msRequestFullscreen();
+
+}
+
+}
+
+document.addEventListener("keydown",e=>{
+
+if(e.key==="f"){
+
+fullscreenPlayer();
+
+}
+
+});
+
+document.getElementById("poster").onerror=function(){
+
+this.src="https://placehold.co/500x750/111111/ffffff?text=No+Poster";
+
+};
+
+window.addEventListener("load",()=>{
+
+document.body.style.opacity="1";
+
+});// ---------- Trailer Button ----------
+
+const trailerBtn=document.createElement("button");
+
+trailerBtn.className="button dark";
+
+trailerBtn.innerHTML="🎥 Trailer";
+
+trailerBtn.onclick=async()=>{
+
+const res=await fetch(
+`https://api.themoviedb.org/3/movie/${info.id}/videos?api_key=${API}`
+);
+
+const vids=await res.json();
+
+const trailer=vids.results.find(v=>
+v.site==="YouTube" && v.type==="Trailer"
+);
+
+if(trailer){
+
+window.open(
+`https://www.youtube.com/watch?v=${trailer.key}`,
+"_blank"
+);
+
+}else{
+
+alert("No trailer found.");
+
+}
+
+};
+
+document.querySelector(".controls").appendChild(trailerBtn);
+
+// ---------- Favorite Button ----------
+
+const favBtn=document.createElement("button");
+
+favBtn.className="button dark";
+
+favBtn.innerHTML="❤️ Favorite";
+
+favBtn.onclick=()=>{
+
+let favs=JSON.parse(localStorage.getItem("favorites")||"[]");
+
+if(!favs.includes(imdb)){
+
+favs.push(imdb);
+
+localStorage.setItem("favorites",JSON.stringify(favs));
+
+alert("Added to Favorites!");
+
+}else{
+
+alert("Already in Favorites.");
+
+}
+
+};
+
+document.querySelector(".controls").appendChild(favBtn);
+
+// ---------- Similar Movies ----------
+
+const similarSection=document.createElement("section");
+
+similarSection.style.padding="35px";
+
+similarSection.innerHTML=`
+
+<h2 style="margin-bottom:25px;">Similar Movies</h2>
+
+<div id="similarGrid" class="grid"></div>
+
+`;
+
+document.body.appendChild(similarSection);
+
+async function loadSimilar(){
+
+const res=await fetch(
+`https://api.themoviedb.org/3/movie/${info.id}/similar?api_key=${API}`
+);
+
+const data=await res.json();
+
+const grid=document.getElementById("similarGrid");
+
+data.results.slice(0,8).forEach(movie=>{
+
+const card=document.createElement("a");
+
+card.className="card";
+
+card.href=`movie.html?id=${movie.imdb_id||""}`;
+
+card.innerHTML=`
+
+<div class="poster">
+
+<img src="https://image.tmdb.org/t/p/w500${movie.poster_path}">
+
+</div>
+
+<div class="info">
+
+<h2>${movie.title}</h2>
+
+<p>⭐ ${movie.vote_average.toFixed(1)}</p>
+
+</div>
+
+`;
+
+grid.appendChild(card);
+
+});
+
+}
+
+loadSimilar();
+
+</script>
+
+</body>
+</html>
