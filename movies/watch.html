@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<title>Graves Movies</title>
+
+<link rel="stylesheet" href="css/style.css">
+
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap" rel="stylesheet">
+
+<style>
+
+.watchContainer{
+
+max-width:1400px;
+margin:auto;
+padding:40px;
+
+}
+
+.backButton{
+
+display:inline-block;
+
+margin-bottom:25px;
+
+padding:12px 22px;
+
+background:#e50914;
+
+color:white;
+
+text-decoration:none;
+
+border-radius:8px;
+
+font-weight:600;
+
+}
+
+.player{
+
+width:100%;
+aspect-ratio:16/9;
+
+background:#111;
+
+border-radius:14px;
+
+overflow:hidden;
+
+margin-bottom:35px;
+
+box-shadow:0 15px 40px rgba(0,0,0,.5);
+
+}
+
+.player iframe{
+
+width:100%;
+height:100%;
+
+border:none;
+
+}
+
+.details{
+
+display:flex;
+
+gap:35px;
+
+align-items:flex-start;
+
+flex-wrap:wrap;
+
+}
+
+.poster{
+
+width:260px;
+
+border-radius:12px;
+
+box-shadow:0 10px 25px rgba(0,0,0,.5);
+
+}
+
+.info{
+
+flex:1;
+
+}
+
+.info h1{
+
+font-size:42px;
+
+margin-bottom:10px;
+
+}
+
+.meta{
+
+color:#bbb;
+
+margin-bottom:20px;
+
+}
+
+.overview{
+
+line-height:1.7;
+
+margin-bottom:25px;
+
+color:#ddd;
+
+}
+
+.selectors{
+
+display:none;
+
+gap:15px;
+
+margin-bottom:30px;
+
+flex-wrap:wrap;
+
+}
+
+.selectors select{
+
+padding:12px;
+
+background:#222;
+
+color:white;
+
+border:none;
+
+border-radius:8px;
+
+font-size:16px;
+
+}
+
+.castRow,
+.recommendations{
+
+display:flex;
+
+overflow-x:auto;
+
+gap:18px;
+
+padding-bottom:10px;
+
+margin-top:15px;
+
+}
+
+.castCard,
+.recCard{
+
+flex:none;
+
+width:140px;
+
+text-align:center;
+
+}
+
+.castCard img,
+.recCard img{
+
+width:100%;
+
+border-radius:10px;
+
+}
+
+.recCard a{
+
+text-decoration:none;
+
+color:white;
+
+}
+
+.sectionTitle{
+
+margin-top:50px;
+
+margin-bottom:15px;
+
+font-size:28px;
+
+}
+
+</style>
+
+</head>
+
+<body>
+
+<div class="watchContainer">
+
+<a href="index.html" class="backButton">← Back to Home</a>
+
+<div class="player">
+
+<iframe
+id="player"
+allowfullscreen
+allow="autoplay; encrypted-media">
+</iframe>
+
+</div>
+
+<div class="details">
+
+<img
+id="poster"
+class="poster">
+
+<div class="info">
+
+<h1 id="title">Loading...</h1>
+
+<div
+class="meta"
+id="meta">
+</div>
+
+<p
+class="overview"
+id="overview">
+</p>
+
+<div
+class="selectors"
+id="selectors">
+
+<select id="seasonSelect"></select>
+
+<select id="episodeSelect"></select>
+
+</div>
+
+</div>
+
+</div>
+
+<h2 class="sectionTitle">
+Cast
+</h2>
+
+<div
+class="castRow"
+id="cast">
+</div>
+
+<h2 class="sectionTitle">
+You Might Also Like
+</h2>
+
+<div
+class="recommendations"
+id="recommendations">
+</div>
+
+</div>
+
+<script src="js/tmdb.js"></script>
+<script src="js/watch.js"></script>
+
+</body>
+</html>
