@@ -1,4 +1,4 @@
-const TMDB_API_KEY = "YOUR_NEW_TMDB_API_KEY";
+const TMDB_API_KEY = "bb33aa47807eec85db1687412383c855";
 
 const library = [
 
