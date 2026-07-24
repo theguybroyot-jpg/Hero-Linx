@@ -1,15 +1,13 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
-
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Graves Movies</title>
 
-<title>Hero Linx Movies</title>
+<link rel="stylesheet" href="css/style.css">
 
-<link rel="stylesheet" href="movies/movies.css">
-
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap" rel="stylesheet">
 </head>
 
 <body>
@@ -17,124 +15,48 @@
 <header>
 
 <div class="logo">
-
-🎬 Hero Linx Movies
-
+🎬 Graves Movies
 </div>
 
-<nav>
-
-<a href="#" class="filter active" data-filter="all">
-
-Home
-
-</a>
-
-<a href="movies/movie.html" class="filter" data-filter="movie">
-
-Movies
-
-</a>
-
-<a href="movies.show.html" class="filter" data-filter="tv">
-
-TV Shows
-
-</a>
-
-<a href="#" class="filter" data-filter="anime">
-
-Anime
-
-</a>
-
-</nav>
-
-<div class="search">
+<div class="searchBox">
 
 <input
 type="text"
 id="search"
-placeholder="Search Movies & Shows...">
+placeholder="Search movies or TV shows...">
 
 </div>
 
 </header>
 
-<section
-class="hero"
-id="hero">
+<section id="hero">
 
 <div class="heroContent">
 
 <h1 id="heroTitle">
-
 Loading...
-
 </h1>
 
-<p id="heroOverview">
-
-Loading featured title...
-
+<p id="heroDescription">
 </p>
 
-<div class="heroButtons">
-
-<a
-id="heroButton"
-class="button red"
-href="#">
-
-▶ Watch Now
-
-</a>
-
-<a
-class="button dark"
-href="../index.html">
-
-⬅ Hero Linx Home
-
-</a>
-
-</div>
+<button id="heroWatch">
+▶ Watch Trailer
+</button>
 
 </div>
 
 </section>
 
-<section class="categories">
+<main>
+
+<section>
+
+<h2>Trending Movies</h2>
 
 <div
-class="category filter active"
-data-filter="all">
-
-🔥 All
-
-</div>
-
-<div
-class="category filter"
-data-filter="movie">
-
-🎬 Movies
-
-</div>
-
-<div
-class="category filter"
-data-filter="tv">
-
-📺 TV Shows
-
-</div>
-
-<div
-class="category filter"
-data-filter="anime">
-
-🌸 Anime
+class="movieRow"
+id="trendingMovies">
 
 </div>
 
@@ -142,23 +64,201 @@ data-filter="anime">
 
 <section>
 
+<h2>Trending TV Shows</h2>
+
 <div
-class="grid"
-id="movieGrid">
+class="movieRow"
+id="trendingTV">
 
 </div>
 
 </section>
 
-<footer>
+<section>
 
-© Hero Linx Movies
+<h2>Popular Movies</h2>
 
-</footer>
+<div
+class="movieRow"
+id="popularMovies">
 
-<script src="library.js"></script>
+</div>
 
-<script src="movies.js"></script>
+</section>
+
+<section>
+
+<h2>Popular TV Shows</h2>
+
+<div
+class="movieRow"
+id="popularTV">
+
+</div>
+
+</section>
+
+<section
+id="searchResultsSection"
+style="display:none;">
+
+<h2>Search Results</h2>
+
+<div
+class="movieRow"
+id="searchResults">
+
+</div>
+
+</section>
+
+</main>
+
+<script>
+
+const API_KEY = "bb33aa47807eec85db1687412383c855";
+
+const IMAGE = "https://image.tmdb.org/t/p/w500";
+
+async function loadCategory(endpoint, container){
+
+const res = await fetch(
+
+`https://api.themoviedb.org/3/${endpoint}?api_key=${API_KEY}`
+
+);
+
+const data = await res.json();
+
+const div = document.getElementById(container);
+
+div.innerHTML = "";
+
+data.results.forEach(item=>{
+
+const title = item.title || item.name;
+
+const type = item.title ? "movie" : "tv";
+
+div.innerHTML += `
+
+<div class="card">
+
+<a href="watch.html?type=${type}&id=${item.id}">
+
+<img src="${IMAGE}${item.poster_path}">
+
+</a>
+
+<h3>${title}</h3>
+
+</div>
+
+`;
+
+});
+
+}
+
+async function hero(){
+
+const res = await fetch(
+
+`https://api.themoviedb.org/3/trending/all/week?api_key=${API_KEY}`
+
+);
+
+const data = await res.json();
+
+const movie = data.results[0];
+
+document.getElementById("heroTitle").textContent =
+movie.title || movie.name;
+
+document.getElementById("heroDescription").textContent =
+movie.overview;
+
+document.getElementById("hero").style.backgroundImage =
+`linear-gradient(rgba(0,0,0,.6),rgba(0,0,0,.9)),url(https://image.tmdb.org/t/p/original${movie.backdrop_path})`;
+
+document.getElementById("heroWatch").onclick=()=>{
+
+location.href=
+`watch.html?type=${movie.title?"movie":"tv"}&id=${movie.id}`;
+
+};
+
+}
+
+async function searchMovies(query){
+
+if(query.length<2){
+
+document.getElementById("searchResultsSection").style.display="none";
+
+return;
+
+}
+
+const res = await fetch(
+
+`https://api.themoviedb.org/3/search/multi?api_key=${API_KEY}&query=${encodeURIComponent(query)}`
+
+);
+
+const data = await res.json();
+
+const div = document.getElementById("searchResults");
+
+div.innerHTML="";
+
+document.getElementById("searchResultsSection").style.display="block";
+
+data.results
+.filter(x=>x.media_type!="person")
+.forEach(item=>{
+
+const title=item.title||item.name;
+
+div.innerHTML+=`
+
+<div class="card">
+
+<a href="watch.html?type=${item.media_type}&id=${item.id}">
+
+<img src="https://image.tmdb.org/t/p/w500${item.poster_path}">
+
+</a>
+
+<h3>${title}</h3>
+
+</div>
+
+`;
+
+});
+
+}
+
+document
+.getElementById("search")
+.addEventListener("input",e=>{
+
+searchMovies(e.target.value);
+
+});
+
+hero();
+
+loadCategory("trending/movie/week","trendingMovies");
+
+loadCategory("trending/tv/week","trendingTV");
+
+loadCategory("movie/popular","popularMovies");
+
+loadCategory("tv/popular","popularTV");
+
+</script>
 
 </body>
 
