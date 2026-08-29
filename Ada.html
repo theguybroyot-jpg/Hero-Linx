@@ -1,0 +1,2800 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ADA: PROTOCOL ZERO</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    background: #050508;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    font-family: 'Courier New', Courier, monospace;
+    overflow: hidden;
+    color: #00ffcc;
+}
+#gameContainer {
+    position: relative;
+    width: 800px;
+    height: 600px;
+    box-shadow: 0 0 30px rgba(0, 255, 204, 0.2), 0 0 60px rgba(0, 100, 255, 0.1);
+    border: 2px solid #1a1a2e;
+}
+canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+    background: #0d0d15;
+}
+.scanlines {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    background: repeating-linear-gradient(0deg, rgba(0,0,0,0.15), rgba(0,0,0,0.15) 1px, transparent 1px, transparent 2px);
+    pointer-events: none;
+    z-index: 10;
+}
+</style>
+</head>
+<body>
+<div id="gameContainer">
+<canvas id="gameCanvas" width="800" height="600"></canvas>
+<div class="scanlines"></div>
+</div>
+<script>
+(function() {
+"use strict";
+
+// ==================== AUDIO ====================
+var AudioSys = {
+    ctx: null,
+    init: function() { if (!this.ctx) this.ctx = new (window.AudioContext||window.webkitAudioContext)(); },
+    play: function(freq, type, duration, vol, fade) {
+        if (!this.ctx) return;
+        vol = vol || 0.08;
+        fade = fade !== false;
+        var osc = this.ctx.createOscillator();
+        var gain = this.ctx.createGain();
+        osc.type = type;
+        osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+        if (fade) {
+            gain.gain.setValueAtTime(vol, this.ctx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + duration);
+        } else {
+            gain.gain.setValueAtTime(vol, this.ctx.currentTime);
+        }
+        osc.connect(gain); gain.connect(this.ctx.destination);
+        osc.start(); osc.stop(this.ctx.currentTime + duration);
+    },
+    noise: function(duration, vol) {
+        if (!this.ctx) return; vol = vol || 0.1;
+        var bs = this.ctx.sampleRate * duration;
+        var buf = this.ctx.createBuffer(1, bs, this.ctx.sampleRate);
+        var d = buf.getChannelData(0);
+        for (var i = 0; i < bs; i++) d[i] = Math.random() * 2 - 1;
+        var n = this.ctx.createBufferSource(); n.buffer = buf;
+        var g = this.ctx.createGain();
+        g.gain.setValueAtTime(vol, this.ctx.currentTime);
+        g.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + duration);
+        n.connect(g); g.connect(this.ctx.destination); n.start();
+    },
+    jump: function() { this.play(300,'square',0.1,0.05); this.play(450,'square',0.08,0.05); },
+    attack: function() { this.play(200,'sawtooth',0.1,0.06); },
+    hit: function() { this.play(150,'square',0.15,0.1); this.noise(0.1,0.08); },
+    shoot: function() { this.play(800,'square',0.08,0.05); this.play(600,'square',0.08,0.03); },
+    super: function() { for(var i=0;i<5;i++) (function(ii){setTimeout(function(){AudioSys.play(200+ii*100,'sawtooth',0.3,0.08);},ii*50);})(i); this.noise(0.4,0.15); },
+    enemyHit: function() { this.play(100,'square',0.1,0.06); },
+    checkpoint: function() { this.play(523,'square',0.1,0.06); setTimeout(function(){AudioSys.play(659,'square',0.1,0.06);},100); setTimeout(function(){AudioSys.play(784,'square',0.2,0.06);},200); },
+    bossHit: function() { this.play(80,'sawtooth',0.2,0.12); this.noise(0.2,0.1); },
+    menuMove: function() { this.play(440,'square',0.05,0.03); },
+    menuSelect: function() { this.play(660,'square',0.15,0.05); },
+    enemyShoot: function() { this.play(400,'square',0.08,0.04); },
+    slide: function() { this.play(120,'sawtooth',0.15,0.05); }
+};
+
+// ==================== SAVE SYSTEM ====================
+var SaveSys = {
+    slots: [],
+    load: function() { this.slots = []; for (var i = 0; i < 4; i++) { var d = localStorage.getItem('ada_save_'+i); this.slots.push(d ? JSON.parse(d) : null); } },
+    save: function(slot, data) { var p = JSON.parse(JSON.stringify(data)); p.timestamp = Date.now(); localStorage.setItem('ada_save_'+slot, JSON.stringify(p)); this.slots[slot] = p; },
+    erase: function(slot) { localStorage.removeItem('ada_save_'+slot); this.slots[slot] = null; },
+    hasSlot: function(s) { return this.slots[s] !== null; }
+};
+SaveSys.load();
+
+// ==================== CONSTANTS ====================
+var TILE = 32;
+var GRAVITY = 0.6;
+var ACCEL = 0.5;
+var MAX_VX = 4.5;
+var JUMP_FORCE = -11.5;
+var SLIDE_SPEED = 8;
+var SLIDE_DUR = 28;
+var ATK_DUR = 16;
+var ATK_COOLDOWN = 20;
+var SUPER_MAX = 100;
+var SUPER_DUR = 40;
+var BLAST_COOLDOWN = 15;
+var INVINCIBLE_DUR = 45;
+var SCREEN_W = 800;
+var SCREEN_H = 600;
+
+var T_AIR = 0, T_GROUND = 1, T_PLAT = 2, T_SPIKE = 3, T_CHECK = 4, T_DOOR = 5;
+
+// ==================== INPUT ====================
+var Input = {
+    keys: {}, pressed: {},
+    init: function() {
+        window.addEventListener('keydown', function(e) {
+            if (['Space','KeyE','KeyF','KeyQ','KeyS','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Enter','Escape'].indexOf(e.code) >= 0) e.preventDefault();
+            if (!Input.keys[e.code]) Input.pressed[e.code] = true;
+            Input.keys[e.code] = true;
+        });
+        window.addEventListener('keyup', function(e) { Input.keys[e.code] = false; });
+    },
+    down: function(k) { return !!Input.keys[k]; },
+    justPressed: function(k) { var p = !!Input.pressed[k]; Input.pressed[k] = false; return p; },
+    clear: function() { Input.pressed = {}; }
+};
+Input.init();
+
+// ==================== CANVAS ====================
+var canvas = document.getElementById('gameCanvas');
+var ctx = canvas.getContext('2d');
+ctx.imageSmoothingEnabled = false;
+
+// ==================== GAME STATE ====================
+var G = {
+    state: 'MENU', subState: '', menuSel: 0, loadSel: 0, pauseSel: 0,
+    stage: 1, checkpoint: { x: 64, y: 300, stage: 1 },
+    player: null, enemies: [], projectiles: [], particles: [],
+    camera: { x: 0, y: 0 }, level: null, shake: 0,
+    unlockBlaster: false, completed: false, openWorld: false,
+    cutscene: null, cutIdx: 0, cutTimer: 0, cutChar: 0,
+    flash: 0, gameTime: 0, kills: 0, wind: 0, bossSpawned: false, saveSlot: 0
+};
+
+// ==================== PALETTE ====================
+var COL = {
+    bg: '#0d0d15', ground: '#2a2a3a', groundTop: '#3a3a4a', plat: '#4a4a5a', spike: '#ff4444',
+    adaBody: '#4a9eff', adaDark: '#2a6fcf', adaAccent: '#ff4a4a', adaEye: '#00ffcc',
+    grunt: '#8b6914', gunner: '#556b2f', heavy: '#5a5a5a', elite: '#800080', boss: '#cc0000',
+    projPlayer: '#00ffff', projEnemy: '#ff4444',
+    text: '#00ffcc', textDim: '#008866',
+    hpBar: '#ff4444', hpBg: '#330000', charge: '#ffcc00', chargeBg: '#332200'
+};
+
+// ==================== PARTICLES ====================
+function spawnParticles(x, y, color, count, speed, life) {
+    for (var i = 0; i < count; i++) {
+        var a = Math.random() * Math.PI * 2;
+        var sp = Math.random() * speed;
+        G.particles.push({ x: x, y: y, vx: Math.cos(a)*sp, vy: Math.sin(a)*sp, life: life||30, maxLife: life||30, color: color, size: Math.random()*4+2 });
+    }
+}
+function updateParticles() {
+    for (var i = G.particles.length-1; i >= 0; i--) {
+        var p = G.particles[i]; p.x += p.vx; p.y += p.vy; p.vy += 0.1; p.life--;
+        if (p.life <= 0) G.particles.splice(i, 1);
+    }
+}
+function drawParticles(cx, cy) {
+    for (var i = 0; i < G.particles.length; i++) {
+        var p = G.particles[i];
+        ctx.globalAlpha = p.life / p.maxLife;
+        ctx.fillStyle = p.color;
+        ctx.fillRect(p.x - cx, p.y - cy, p.size, p.size);
+    }
+    ctx.globalAlpha = 1;
+}
+
+// ==================== LEVEL SYSTEM ====================
+function parseLevel(strings, theme) {
+    var h = strings.length, w = strings[0].length;
+    var tiles = [], enemies = [];
+    var start = { x: 64, y: 300 };
+    for (var y = 0; y < h; y++) {
+        tiles[y] = [];
+        for (var x = 0; x < w; x++) {
+            var c = strings[y][x] || ' ';
+            var t = T_AIR;
+            if (c === '#') t = T_GROUND;
+            else if (c === '=') t = T_PLAT;
+            else if (c === '^') t = T_SPIKE;
+            else if (c === '>') t = T_CHECK;
+            else if (c === 'D') t = T_DOOR;
+            else if (c === '@') start = { x: x*TILE+16, y: y*TILE };
+            else if (c === 'E') enemies.push({ type: 'grunt', x: x*TILE+16, y: y*TILE });
+            else if (c === 'G') enemies.push({ type: 'gunner', x: x*TILE+16, y: y*TILE });
+            else if (c === 'H') enemies.push({ type: 'heavy', x: x*TILE+16, y: y*TILE });
+            else if (c === 'L') enemies.push({ type: 'elite', x: x*TILE+16, y: y*TILE });
+            else if (c === 'B') enemies.push({ type: 'boss', x: x*TILE+16, y: y*TILE });
+            tiles[y][x] = t;
+        }
+    }
+    return { tiles: tiles, width: w, height: h, enemies: enemies, start: start, theme: theme || 'default', name: '' };
+}
+
+function buildLevel(stage) {
+    G.wind = 0; G.bossSpawned = false;
+    switch(stage) {
+        case 1: return buildAlley();
+        case 2: return buildStreets();
+        case 3: return buildFactory();
+        case 4: return buildSewer();
+        case 5: return buildDowntown();
+        case 6: return buildBridge();
+        case 7: return buildIndustrial();
+        case 8: return buildWasteland();
+        case 9: return buildCamp();
+        case 10: return buildBase();
+        case 11: return buildBossArena();
+        case 12: return buildOpenWorld();
+        default: return buildAlley();
+    }
+}
+
+function buildAlley() {
+    var rows = [];
+    var W = 70, H = 18;
+    for (var y = 0; y < H; y++) {
+        var row = '';
+        for (var x = 0; x < W; x++) {
+            if (y === H-1) row += '#';
+            else if (y === H-2 && x > 5 && x < W-1) row += '#';
+            else if (y === 12 && (x > 8 && x < 15)) row += '=';
+            else if (y === 10 && (x > 20 && x < 28)) row += '=';
+            else if (y === 9 && (x > 35 && x < 42)) row += '=';
+            else if (y === 11 && (x > 50 && x < 58)) row += '=';
+            else if (x === 0 || x === W-1) row += '#';
+            else if (x === 3 && y === 14) row += '@';
+            else if (x === 12 && y === 11) row += 'E';
+            else if (x === 16 && y === 14) row += 'E';
+            else if (x === 25 && y === 9) row += 'E';
+            else if (x === 30 && y === 14) row += 'E';
+            else if (x === 38 && y === 8) row += 'E';
+            else if (x === 42 && y === 14) row += 'E';
+            else if (x === 48 && y === 11) row += 'E';
+            else if (x === 55 && y === 14) row += 'E';
+            else if (x === 60 && y === 14) row += '>';
+            else if (x === 67 && y === 14) row += 'D';
+            else row += ' ';
+        }
+        rows.push(row);
+    }
+    var lvl = parseLevel(rows, 'alley');
+    lvl.name = 'STAGE 1: THE ALLEY';
+    return lvl;
+}
+
+function buildStreets() {
+    var rows = [];
+    var W = 90, H = 18;
+    for (var y = 0; y < H; y++) {
+        var row = '';
+        for (var x = 0; x < W; x++) {
+            if (y === H-1) row += '#';
+            else if (y === H-2 && x > 3 && x < W-1) row += '#';
+            else if (y === 13 && (x > 10 && x < 18)) row += '=';
+            else if (y === 11 && (x > 25 && x < 33)) row += '=';
+            else if (y === 14 && (x > 40 && x < 48)) row += '=';
+            else if (y === 10 && (x > 55 && x < 63)) row += '=';
+            else if (y === 12 && (x > 68 && x < 75)) row += '=';
+            else if (y === 13 && (x > 80 && x < 86)) row += '=';
+            else if (x === 0 || x === W-1) row += '#';
+            else if (x === 3 && y === 14) row += '@';
+            else if (x === 15 && y === 12) row += 'E';
+            else if (x === 20 && y === 14) row += 'E';
+            else if (x === 24 && y === 14) row += 'E';
+            else if (x === 30 && y === 10) row += 'G';
+            else if (x === 35 && y === 14) row += 'E';
+            else if (x === 38 && y === 14) row += 'E';
+            else if (x === 45 && y === 12) row += 'E';
+            else if (x === 50 && y === 14) row += 'E';
+            else if (x === 58 && y === 9) row += 'G';
+            else if (x === 62 && y === 14) row += 'E';
+            else if (x === 65 && y === 14) row += 'E';
+            else if (x === 72 && y === 12) row += 'E';
+            else if (x === 78 && y === 14) row += 'E';
+            else if (x === 82 && y === 13) row += 'E';
+            else if (x === 60 && y === 14) row += '>';
+            else if (x === 87 && y === 14) row += 'D';
+            else row += ' ';
+        }
+        rows.push(row);
+    }
+    var lvl = parseLevel(rows, 'streets');
+    lvl.name = 'STAGE 2: CITY STREETS';
+    return lvl;
+}
+
+function buildFactory() {
+    var rows = [];
+    var W = 80, H = 20;
+    for (var y = 0; y < H; y++) {
+        var row = '';
+        for (var x = 0; x < W; x++) {
+            if (y === H-1) row += '#';
+            else if (y === H-2 && (x < 10 || x > 15) && (x < 30 || x > 35) && (x < 50 || x > 55) && (x < 70)) row += '#';
+            else if (y === 14 && (x > 5 && x < 15)) row += '=';
+            else if (y === 12 && (x > 20 && x < 30)) row += '=';
+            else if (y === 10 && (x > 35 && x < 45)) row += '=';
+            else if (y === 13 && (x > 50 && x < 60)) row += '=';
+            else if (y === 9 && (x > 60 && x < 68)) row += '=';
+            else if (y === 11 && (x > 72 && x < 78)) row += '=';
+            else if (x === 0 || x === W-1) row += '#';
+            else if (x === 3 && y === 16) row += '@';
+            else if (x === 10 && y === 13) row += 'E';
+            else if (x === 14 && y === 16) row += 'E';
+            else if (x === 18 && y === 16) row += 'E';
+            else if (x === 25 && y === 11) row += 'G';
+            else if (x === 28 && y === 16) row += 'E';
+            else if (x === 32 && y === 16) row += 'E';
+            else if (x === 40 && y === 9) row += 'G';
+            else if (x === 45 && y === 16) row += 'E';
+            else if (x === 48 && y === 16) row += 'E';
+            else if (x === 55 && y === 12) row += 'G';
+            else if (x === 58 && y === 16) row += 'E';
+            else if (x === 62 && y === 16) row += 'E';
+            else if (x === 68 && y === 16) row += 'E';
+            else if (x === 35 && y === 16) row += '>';
+            else if (x === 76 && y === 16) row += 'D';
+            else row += ' ';
+        }
+        rows.push(row);
+    }
+    var lvl = parseLevel(rows, 'factory');
+    lvl.name = 'STAGE 3: ABANDONED FACTORY';
+    return lvl;
+}
+
+function buildSewer() {
+    var rows = [];
+    var W = 75, H = 18;
+    for (var y = 0; y < H; y++) {
+        var row = '';
+        for (var x = 0; x < W; x++) {
+            if (y === H-1) row += '^';
+            else if (y === H-2) row += '#';
+            else if (y === 14 && (x > 5 && x < 15)) row += '=';
+            else if (y === 11 && (x > 18 && x < 28)) row += '=';
+            else if (y === 13 && (x > 32 && x < 42)) row += '=';
+            else if (y === 10 && (x > 48 && x < 58)) row += '=';
+            else if (y === 12 && (x > 62 && x < 72)) row += '=';
+            else if (x === 0 || x === W-1) row += '#';
+            else if (x === 3 && y === 12) row += '@';
+            else if (x === 10 && y === 13) row += 'E';
+            else if (x === 14 && y === 13) row += 'E';
+            else if (x === 18 && y === 13) row += 'E';
+            else if (x === 22 && y === 10) row += 'H';
+            else if (x === 28 && y === 13) row += 'E';
+            else if (x === 32 && y === 13) row += 'E';
+            else if (x === 36 && y === 13) row += 'E';
+            else if (x === 42 && y === 13) row += 'E';
+            else if (x === 48 && y === 9) row += 'H';
+            else if (x === 52 && y === 13) row += 'E';
+            else if (x === 56 && y === 13) row += 'E';
+            else if (x === 60 && y === 13) row += 'E';
+            else if (x === 65 && y === 13) row += 'E';
+            else if (x === 68 && y === 13) row += 'E';
+            else if (x === 45 && y === 13) row += '>';
+            else if (x === 72 && y === 13) row += 'D';
+            else row += ' ';
+        }
+        rows.push(row);
+    }
+    var lvl = parseLevel(rows, 'sewer');
+    lvl.name = 'STAGE 4: SEWER SYSTEM';
+    return lvl;
+}
+
+function buildDowntown() {
+    var rows = [];
+    var W = 70, H = 24;
+    for (var y = 0; y < H; y++) {
+        var row = '';
+        for (var x = 0; x < W; x++) {
+            if (y === H-1) row += '#';
+            else if (y === H-2 && x > 3 && x < W-1) row += '#';
+            else if (y === 18 && (x > 5 && x < 15)) row += '=';
+            else if (y === 15 && (x > 18 && x < 28)) row += '=';
+            else if (y === 12 && (x > 30 && x < 40)) row += '=';
+            else if (y === 16 && (x > 42 && x < 50)) row += '=';
+            else if (y === 10 && (x > 52 && x < 58)) row += '=';
+            else if (y === 8 && (x > 8 && x < 18)) row += '=';
+            else if (y === 6 && (x > 25 && x < 35)) row += '=';
+            else if (x === 0 || x === W-1) row += '#';
+            else if (x === 3 && y === 20) row += '@';
+            else if (x === 12 && y === 17) row += 'E';
+            else if (x === 16 && y === 20) row += 'E';
+            else if (x === 22 && y === 14) row += 'G';
+            else if (x === 26 && y === 20) row += 'E';
+            else if (x === 30 && y === 20) row += 'E';
+            else if (x === 35 && y === 11) row += 'G';
+            else if (x === 38 && y === 20) row += 'E';
+            else if (x === 40 && y === 20) row += 'H';
+            else if (x === 45 && y === 15) row += 'E';
+            else if (x === 48 && y === 15) row += 'E';
+            else if (x === 52 && y === 20) row += 'E';
+            else if (x === 55 && y === 9) row += 'G';
+            else if (x === 58 && y === 20) row += 'E';
+            else if (x === 62 && y === 20) row += 'E';
+            else if (x === 45 && y === 20) row += '>';
+            else if (x === 67 && y === 20) row += 'D';
+            else row += ' ';
+        }
+        rows.push(row);
+    }
+    var lvl = parseLevel(rows, 'downtown');
+    lvl.name = 'STAGE 5: DOWNTOWN RUINS';
+    return lvl;
+}
+
+function buildBridge() {
+    G.wind = -0.03;
+    var rows = [];
+    var W = 110, H = 16;
+    for (var y = 0; y < H; y++) {
+        var row = '';
+        for (var x = 0; x < W; x++) {
+            if (y === H-1) row += '#';
+            else if (y === H-2 && x > 3 && x < W-1) row += '#';
+            else if (y === 10 && (x > 15 && x < 25)) row += '=';
+            else if (y === 10 && (x > 40 && x < 50)) row += '=';
+            else if (y === 10 && (x > 65 && x < 75)) row += '=';
+            else if (y === 10 && (x > 85 && x < 95)) row += '=';
+            else if (x === 0 || x === W-1) row += '#';
+            else if (x === 3 && y === 12) row += '@';
+            else if (x === 10 && y === 12) row += 'E';
+            else if (x === 14 && y === 12) row += 'E';
+            else if (x === 18 && y === 12) row += 'E';
+            else if (x === 25 && y === 12) row += 'G';
+            else if (x === 32 && y === 12) row += 'E';
+            else if (x === 36 && y === 12) row += 'E';
+            else if (x === 42 && y === 12) row += 'H';
+            else if (x === 48 && y === 12) row += 'E';
+            else if (x === 52 && y === 12) row += 'E';
+            else if (x === 58 && y === 12) row += 'G';
+            else if (x === 62 && y === 12) row += 'E';
+            else if (x === 68 && y === 12) row += 'E';
+            else if (x === 72 && y === 12) row += 'H';
+            else if (x === 78 && y === 12) row += 'E';
+            else if (x === 82 && y === 12) row += 'E';
+            else if (x === 85 && y === 12) row += 'G';
+            else if (x === 90 && y === 12) row += 'E';
+            else if (x === 95 && y === 12) row += 'E';
+            else if (x === 70 && y === 12) row += '>';
+            else if (x === 107 && y === 12) row += 'D';
+            else row += ' ';
+        }
+        rows.push(row);
+    }
+    var lvl = parseLevel(rows, 'bridge');
+    lvl.name = 'STAGE 6: THE BRIDGE';
+    return lvl;
+}
+
+function buildIndustrial() {
+    var rows = [];
+    var W = 90, H = 20;
+    for (var y = 0; y < H; y++) {
+        var row = '';
+        for (var x = 0; x < W; x++) {
+            if (y === H-1) row += '#';
+            else if (y === H-2 && (x < 8 || x > 12) && (x < 28 || x > 32) && (x < 48 || x > 52) && (x < 68) && (x < 82 || x > 86)) row += '#';
+            else if (y === 15 && (x > 5 && x < 15)) row += '=';
+            else if (y === 12 && (x > 20 && x < 30)) row += '=';
+            else if (y === 14 && (x > 35 && x < 45)) row += '=';
+            else if (y === 11 && (x > 50 && x < 60)) row += '=';
+            else if (y === 13 && (x > 65 && x < 75)) row += '=';
+            else if (y === 10 && (x > 78 && x < 86)) row += '=';
+            else if (x === 0 || x === W-1) row += '#';
+            else if (x === 3 && y === 16) row += '@';
+            else if (x === 10 && y === 14) row += 'E';
+            else if (x === 14 && y === 16) row += 'E';
+            else if (x === 18 && y === 16) row += 'G';
+            else if (x === 25 && y === 11) row += 'E';
+            else if (x === 28 && y === 11) row += 'E';
+            else if (x === 32 && y === 16) row += 'H';
+            else if (x === 38 && y === 13) row += 'G';
+            else if (x === 42 && y === 16) row += 'E';
+            else if (x === 45 && y === 16) row += 'E';
+            else if (x === 48 && y === 16) row += 'E';
+            else if (x === 55 && y === 10) row += 'H';
+            else if (x === 58 && y === 10) row += 'E';
+            else if (x === 62 && y === 16) row += 'G';
+            else if (x === 68 && y === 16) row += 'E';
+            else if (x === 72 && y === 16) row += 'E';
+            else if (x === 78 && y === 16) row += 'E';
+            else if (x === 82 && y === 16) row += 'E';
+            else if (x === 50 && y === 16) row += '>';
+            else if (x === 86 && y === 16) row += 'D';
+            else row += ' ';
+        }
+        rows.push(row);
+    }
+    var lvl = parseLevel(rows, 'industrial');
+    lvl.name = 'STAGE 7: INDUSTRIAL COMPLEX';
+    return lvl;
+}
+
+function buildWasteland() {
+    var rows = [];
+    var W = 100, H = 16;
+    for (var y = 0; y < H; y++) {
+        var row = '';
+        for (var x = 0; x < W; x++) {
+            if (y === H-1) row += '#';
+            else if (y === H-2 && x > 3 && x < W-1) row += '#';
+            else if (y === 10 && (x > 10 && x < 20)) row += '=';
+            else if (y === 10 && (x > 35 && x < 45)) row += '=';
+            else if (y === 10 && (x > 60 && x < 70)) row += '=';
+            else if (y === 10 && (x > 80 && x < 90)) row += '=';
+            else if (x === 0 || x === W-1) row += '#';
+            else if (x === 3 && y === 12) row += '@';
+            else if (x === 8 && y === 12) row += 'E';
+            else if (x === 12 && y === 12) row += 'E';
+            else if (x === 16 && y === 12) row += 'E';
+            else if (x === 20 && y === 12) row += 'G';
+            else if (x === 24 && y === 12) row += 'E';
+            else if (x === 28 && y === 12) row += 'H';
+            else if (x === 35 && y === 12) row += 'E';
+            else if (x === 38 && y === 12) row += 'E';
+            else if (x === 42 && y === 12) row += 'E';
+            else if (x === 48 && y === 12) row += 'G';
+            else if (x === 52 && y === 12) row += 'H';
+            else if (x === 56 && y === 12) row += 'E';
+            else if (x === 60 && y === 12) row += 'E';
+            else if (x === 64 && y === 12) row += 'L';
+            else if (x === 68 && y === 12) row += 'E';
+            else if (x === 72 && y === 12) row += 'E';
+            else if (x === 76 && y === 12) row += 'G';
+            else if (x === 80 && y === 12) row += 'E';
+            else if (x === 84 && y === 12) row += 'E';
+            else if (x === 88 && y === 12) row += 'L';
+            else if (x === 92 && y === 12) row += 'E';
+            else if (x === 96 && y === 12) row += 'E';
+            else if (x === 55 && y === 12) row += '>';
+            else if (x === 97 && y === 12) row += 'D';
+            else row += ' ';
+        }
+        rows.push(row);
+    }
+    var lvl = parseLevel(rows, 'wasteland');
+    lvl.name = 'STAGE 8: THE WASTELAND';
+    return lvl;
+}
+
+function buildCamp() {
+    var rows = [];
+    var W = 90, H = 18;
+    for (var y = 0; y < H; y++) {
+        var row = '';
+        for (var x = 0; x < W; x++) {
+            if (y === H-1) row += '#';
+            else if (y === H-2 && x > 3 && x < W-1) row += '#';
+            else if (y === 13 && (x > 5 && x < 12)) row += '=';
+            else if (y === 10 && (x > 18 && x < 28)) row += '=';
+            else if (y === 13 && (x > 35 && x < 42)) row += '=';
+            else if (y === 11 && (x > 50 && x < 58)) row += '=';
+            else if (y === 13 && (x > 65 && x < 72)) row += '=';
+            else if (y === 10 && (x > 78 && x < 85)) row += '=';
+            else if (x === 0 || x === W-1) row += '#';
+            else if (x === 3 && y === 14) row += '@';
+            else if (x === 10 && y === 12) row += 'E';
+            else if (x === 14 && y === 14) row += 'E';
+            else if (x === 18 && y === 14) row += 'G';
+            else if (x === 22 && y === 9) row += 'E';
+            else if (x === 26 && y === 9) row += 'E';
+            else if (x === 30 && y === 14) row += 'H';
+            else if (x === 35 && y === 12) row += 'E';
+            else if (x === 38 && y === 14) row += 'G';
+            else if (x === 42 && y === 14) row += 'E';
+            else if (x === 46 && y === 14) row += 'H';
+            else if (x === 50 && y === 14) row += 'E';
+            else if (x === 54 && y === 10) row += 'E';
+            else if (x === 58 && y === 10) row += 'E';
+            else if (x === 62 && y === 14) row += 'L';
+            else if (x === 66 && y === 14) row += 'G';
+            else if (x === 70 && y === 14) row += 'E';
+            else if (x === 74 && y === 14) row += 'E';
+            else if (x === 78 && y === 14) row += 'E';
+            else if (x === 82 && y === 14) row += 'E';
+            else if (x === 50 && y === 14) row += '>';
+            else if (x === 86 && y === 14) row += 'D';
+            else row += ' ';
+        }
+        rows.push(row);
+    }
+    var lvl = parseLevel(rows, 'camp');
+    lvl.name = 'STAGE 9: RESISTANCE CAMP';
+    return lvl;
+}
+
+function buildBase() {
+    var rows = [];
+    var W = 100, H = 18;
+    for (var y = 0; y < H; y++) {
+        var row = '';
+        for (var x = 0; x < W; x++) {
+            if (y === H-1) row += '#';
+            else if (y === H-2 && (x < 10 || x > 15) && (x < 30 || x > 35) && (x < 50 || x > 55) && (x < 70 || x > 75) && (x < 88)) row += '#';
+            else if (y === 14 && (x > 5 && x < 15)) row += '=';
+            else if (y === 11 && (x > 20 && x < 30)) row += '=';
+            else if (y === 13 && (x > 38 && x < 48)) row += '=';
+            else if (y === 10 && (x > 55 && x < 65)) row += '=';
+            else if (y === 12 && (x > 72 && x < 82)) row += '=';
+            else if (y === 11 && (x > 85 && x < 95)) row += '=';
+            else if (x === 0 || x === W-1) row += '#';
+            else if (x === 3 && y === 16) row += '@';
+            else if (x === 10 && y === 13) row += 'E';
+            else if (x === 14 && y === 16) row += 'E';
+            else if (x === 18 && y === 16) row += 'G';
+            else if (x === 22 && y === 16) row += 'E';
+            else if (x === 26 && y === 10) row += 'H';
+            else if (x === 30 && y === 16) row += 'E';
+            else if (x === 34 && y === 16) row += 'E';
+            else if (x === 42 && y === 12) row += 'L';
+            else if (x === 46 && y === 16) row += 'G';
+            else if (x === 50 && y === 16) row += 'E';
+            else if (x === 54 && y === 16) row += 'E';
+            else if (x === 58 && y === 16) row += 'H';
+            else if (x === 62 && y === 16) row += 'E';
+            else if (x === 66 && y === 9) row += 'E';
+            else if (x === 70 && y === 16) row += 'E';
+            else if (x === 74 && y === 16) row += 'L';
+            else if (x === 78 && y === 16) row += 'G';
+            else if (x === 82 && y === 16) row += 'E';
+            else if (x === 86 && y === 16) row += 'E';
+            else if (x === 90 && y === 16) row += 'E';
+            else if (x === 60 && y === 16) row += '>';
+            else if (x === 97 && y === 16) row += 'D';
+            else row += ' ';
+        }
+        rows.push(row);
+    }
+    var lvl = parseLevel(rows, 'base');
+    lvl.name = 'STAGE 10: BASE INTERIOR';
+    return lvl;
+}
+
+function buildBossArena() {
+    var rows = [];
+    var W = 55, H = 18;
+    for (var y = 0; y < H; y++) {
+        var row = '';
+        for (var x = 0; x < W; x++) {
+            if (y === H-1) row += '#';
+            else if (y === H-2 && x > 3 && x < W-1) row += '#';
+            else if (y === 12 && (x > 5 && x < 15)) row += '=';
+            else if (y === 12 && (x > 35 && x < 45)) row += '=';
+            else if (x === 0 || x === W-1) row += '#';
+            else if (x === 5 && y === 14) row += '@';
+            else if (x === 42 && y === 14) row += 'B';
+            else row += ' ';
+        }
+        rows.push(row);
+    }
+    var lvl = parseLevel(rows, 'boss');
+    lvl.name = 'STAGE 11: LEADER CHAMBER';
+    return lvl;
+}
+
+function buildOpenWorld() {
+    var rows = [];
+    var W = 140, H = 16;
+    for (var y = 0; y < H; y++) {
+        var row = '';
+        for (var x = 0; x < W; x++) {
+            if (y === H-1) row += '#';
+            else if (y === H-2 && x > 3 && x < W-1) row += '#';
+            else if (y === 10 && Math.random() > 0.82 && x > 5 && x < W-5) row += '=';
+            else if (x === 0 || x === W-1) row += '#';
+            else if (x === 3 && y === 12) row += '@';
+            else if (Math.random() > 0.90 && x > 10 && x < W-5 && y < 12) {
+                var r = Math.random();
+                if (r < 0.35) row += 'E';
+                else if (r < 0.65) row += 'G';
+                else if (r < 0.85) row += 'H';
+                else row += 'L';
+            }
+            else row += ' ';
+        }
+        rows.push(row);
+    }
+    var lvl = parseLevel(rows, 'openworld');
+    lvl.name = 'OPEN WORLD: THE WASTELAND';
+    return lvl;
+}
+
+// ==================== ENTITY BASE ====================
+function Entity(x, y, w, h) {
+    this.x = x; this.y = y;
+    this.w = w; this.h = h;
+    this.vx = 0; this.vy = 0;
+    this.grounded = false;
+    this.facing = 1;
+    this.health = 100; this.maxHealth = 100;
+    this.dead = false;
+    this.invincible = 0;
+    this.animFrame = 0; this.animTimer = 0;
+    this.attackAnim = 0;
+}
+Entity.prototype.rect = function() { return { x: this.x, y: this.y, w: this.w, h: this.h }; };
+Entity.prototype.center = function() { return { x: this.x + this.w/2, y: this.y + this.h/2 }; };
+Entity.prototype.updateAnim = function() {
+    this.animTimer++;
+    if (this.animTimer > 8) { this.animTimer = 0; this.animFrame = (this.animFrame + 1) % 4; }
+};
+
+// ==================== PLAYER ====================
+function Player(x, y) {
+    Entity.call(this, x, y, 22, 38);
+    this.maxHealth = 100; this.health = 100;
+    this.charge = 0;
+    this.state = 'idle';
+    this.stateTimer = 0;
+    this.atkCooldown = 0;
+    this.blastCooldown = 0;
+    this.superTimer = 0;
+    this.slideTimer = 0;
+    this.crouch = false;
+    this.flash = 0;
+}
+Player.prototype = Object.create(Entity.prototype);
+Player.prototype.constructor = Player;
+
+Player.prototype.update = function() {
+    if (this.invincible > 0) this.invincible--;
+    if (this.atkCooldown > 0) this.atkCooldown--;
+    if (this.blastCooldown > 0) this.blastCooldown--;
+    if (this.flash > 0) this.flash--;
+
+    if (this.state === 'super') {
+        this.superTimer--;
+        if (this.superTimer <= 0) this.state = 'idle';
+        this.updateAnim();
+        return;
+    }
+    if (this.state === 'hurt') {
+        this.stateTimer--;
+        if (this.stateTimer <= 0) this.state = 'idle';
+        this.vx *= 0.9;
+        this.vy += GRAVITY;
+        this.moveY();
+        return;
+    }
+
+    var left = Input.down('KeyA') || Input.down('ArrowLeft');
+    var right = Input.down('KeyD') || Input.down('ArrowRight');
+    var jump = Input.justPressed('Space');
+    var crouch = Input.down('KeyS') || Input.down('ArrowDown');
+    var attack = Input.justPressed('KeyE');
+    var superAtk = Input.justPressed('KeyF');
+    var blast = Input.justPressed('KeyQ');
+
+    // Wind
+    if (G.wind !== 0) {
+        if (!this.grounded) this.vx += G.wind * 3;
+        else this.vx += G.wind * 0.5;
+    }
+
+    // Crouch / Slide
+    if (this.grounded && crouch && (left || right) && this.state !== 'slide') {
+        this.state = 'slide';
+        this.slideTimer = SLIDE_DUR;
+        this.vx = SLIDE_SPEED * this.facing;
+        this.h = 20;
+        this.y += 18;
+        AudioSys.slide();
+    }
+
+    if (this.state === 'slide') {
+        this.slideTimer--;
+        this.vx *= 0.96;
+        if (this.slideTimer <= 0 || Math.abs(this.vx) < 1) {
+            this.state = 'idle';
+            this.h = 38;
+            this.y -= 18;
+        }
+        this.vy += GRAVITY;
+        this.moveX();
+        this.moveY();
+        this.checkSlideHit();
+        this.updateAnim();
+        return;
+    }
+
+    if (this.grounded && crouch && !left && !right) {
+        this.crouch = true;
+        if (this.h === 38) { this.h = 22; this.y += 16; }
+    } else {
+        if (this.crouch && !crouch) {
+            this.crouch = false;
+            this.h = 38;
+            this.y -= 16;
+        }
+    }
+
+    if (superAtk && this.charge >= SUPER_MAX && this.state !== 'attack') {
+        this.state = 'super';
+        this.superTimer = SUPER_DUR;
+        this.charge = 0;
+        G.shake = 10;
+        AudioSys.super();
+        this.doSuperDamage();
+        spawnParticles(this.x + this.w/2, this.y + this.h/2, '#ffcc00', 30, 6, 40);
+        return;
+    }
+
+    if (attack && this.atkCooldown <= 0 && this.state !== 'attack') {
+        if (!this.grounded) {
+            this.state = 'airattack';
+            this.stateTimer = ATK_DUR;
+            this.vy = 8;
+            AudioSys.attack();
+        } else {
+            this.state = 'attack';
+            this.stateTimer = ATK_DUR;
+            this.atkCooldown = ATK_COOLDOWN;
+            AudioSys.attack();
+        }
+    }
+
+    if (this.state === 'attack' || this.state === 'airattack') {
+        this.stateTimer--;
+        if (this.state === 'airattack') {
+            this.vy += GRAVITY * 1.5;
+            this.moveX();
+            this.moveY();
+            this.checkAttackHit(30, 40);
+        } else {
+            this.vx *= 0.8;
+            this.vy += GRAVITY;
+            this.moveY();
+            this.checkAttackHit(35, 25);
+        }
+        if (this.stateTimer <= 0) this.state = 'idle';
+        this.updateAnim();
+        return;
+    }
+
+    if (blast && G.unlockBlaster && this.blastCooldown <= 0) {
+        this.blastCooldown = BLAST_COOLDOWN;
+        var px = this.facing > 0 ? this.x + this.w + 4 : this.x - 12;
+        var py = this.y + this.h/2 - 4;
+        G.projectiles.push(new Projectile(px, py, this.facing * 8, 0, 'player', 15));
+        AudioSys.shoot();
+        spawnParticles(px, py, '#00ffff', 5, 2, 10);
+    }
+
+    if (!this.crouch) {
+        if (left) { this.vx -= ACCEL; this.facing = -1; }
+        if (right) { this.vx += ACCEL; this.facing = 1; }
+    }
+    this.vx *= 0.85;
+    this.vx = Math.max(-MAX_VX, Math.min(MAX_VX, this.vx));
+
+    if (jump && this.grounded && !this.crouch) {
+        this.vy = JUMP_FORCE;
+        this.grounded = false;
+        AudioSys.jump();
+        spawnParticles(this.x + this.w/2, this.y + this.h, '#aaaaaa', 4, 2, 15);
+    }
+
+    this.vy += GRAVITY;
+    this.moveX();
+    this.moveY();
+
+    if (Math.abs(this.vx) > 0.5 && this.grounded) this.state = 'walk';
+    else if (this.grounded) this.state = 'idle';
+    else this.state = 'jump';
+
+    this.updateAnim();
+
+    if (this.y > G.level.height * TILE + 100) {
+        this.takeDamage(20);
+        this.x = G.checkpoint.x;
+        this.y = G.checkpoint.y;
+        this.vx = 0; this.vy = 0;
+    }
+};
+
+Player.prototype.moveX = function() {
+    this.x += this.vx;
+    if (this.collideSolid()) {
+        if (this.vx > 0) this.x = Math.floor((this.x + this.w) / TILE) * TILE - this.w - 0.01;
+        else this.x = Math.floor(this.x / TILE + 1) * TILE;
+        this.vx = 0;
+    }
+};
+
+Player.prototype.moveY = function() {
+    this.y += this.vy;
+    this.grounded = false;
+    if (this.collideSolid()) {
+        if (this.vy > 0) {
+            this.y = Math.floor((this.y + this.h) / TILE) * TILE - this.h - 0.01;
+            this.grounded = true;
+        } else {
+            this.y = Math.floor(this.y / TILE + 1) * TILE;
+        }
+        this.vy = 0;
+    }
+    if (this.touchTile(T_SPIKE)) {
+        this.takeDamage(30);
+        this.vy = -8;
+    }
+    if (this.touchTile(T_CHECK)) {
+        var cp = this.getTilePos(T_CHECK);
+        if (cp && (G.checkpoint.x !== cp.x || G.checkpoint.y !== cp.y)) {
+            G.checkpoint = { x: cp.x, y: cp.y, stage: G.stage };
+            AudioSys.checkpoint();
+            spawnParticles(cp.x + 16, cp.y, '#00ff00', 15, 3, 30);
+        }
+    }
+    if (this.touchTile(T_DOOR)) {
+        nextStage();
+    }
+};
+
+Player.prototype.collideSolid = function() {
+    var left = Math.floor(this.x / TILE);
+    var right = Math.floor((this.x + this.w - 0.01) / TILE);
+    var top = Math.floor(this.y / TILE);
+    var bottom = Math.floor((this.y + this.h - 0.01) / TILE);
+    for (var ty = top; ty <= bottom; ty++) {
+        for (var tx = left; tx <= right; tx++) {
+            var t = getTile(tx, ty);
+            if (t === T_GROUND || t === T_PLAT) return true;
+        }
+    }
+    return false;
+};
+
+Player.prototype.touchTile = function(tileType) {
+    var left = Math.floor(this.x / TILE);
+    var right = Math.floor((this.x + this.w - 0.01) / TILE);
+    var top = Math.floor(this.y / TILE);
+    var bottom = Math.floor((this.y + this.h - 0.01) / TILE);
+    for (var ty = top; ty <= bottom; ty++) {
+        for (var tx = left; tx <= right; tx++) {
+            if (getTile(tx, ty) === tileType) return true;
+        }
+    }
+    return false;
+};
+
+Player.prototype.getTilePos = function(tileType) {
+    var left = Math.floor(this.x / TILE);
+    var right = Math.floor((this.x + this.w - 0.01) / TILE);
+    var top = Math.floor(this.y / TILE);
+    var bottom = Math.floor((this.y + this.h - 0.01) / TILE);
+    for (var ty = top; ty <= bottom; ty++) {
+        for (var tx = left; tx <= right; tx++) {
+            if (getTile(tx, ty) === tileType) return { x: tx * TILE, y: ty * TILE };
+        }
+    }
+    return null;
+};
+
+Player.prototype.checkAttackHit = function(range, damage) {
+    var cx = this.x + this.w/2 + this.facing * range;
+    var cy = this.y + this.h/2;
+    for (var i = 0; i < G.enemies.length; i++) {
+        var e = G.enemies[i];
+        if (e.dead) continue;
+        var ex = e.x + e.w/2, ey = e.y + e.h/2;
+        var dist = Math.hypot(cx - ex, cy - ey);
+        if (dist < range + e.w/2) {
+            e.takeDamage(damage, this.facing * 4);
+            this.charge = Math.min(SUPER_MAX, this.charge + 12);
+            G.shake = 3;
+            spawnParticles(ex, ey, '#ff4444', 8, 3, 20);
+            AudioSys.enemyHit();
+        }
+    }
+};
+
+Player.prototype.checkSlideHit = function() {
+    var hitX = this.facing > 0 ? this.x + this.w + 4 : this.x - 4;
+    var hitY = this.y + this.h/2;
+    for (var i = 0; i < G.enemies.length; i++) {
+        var e = G.enemies[i];
+        if (e.dead) continue;
+        var ex = e.x + e.w/2, ey = e.y + e.h/2;
+        var dist = Math.hypot(hitX - ex, hitY - ey);
+        if (dist < 30) {
+            e.takeDamage(30, this.facing * 6);
+            this.charge = Math.min(SUPER_MAX, this.charge + 15);
+            G.shake = 4;
+            spawnParticles(ex, ey, '#ff8800', 10, 4, 20);
+            AudioSys.enemyHit();
+        }
+    }
+};
+
+Player.prototype.doSuperDamage = function() {
+    var cx = this.x + this.w/2, cy = this.y + this.h/2;
+    for (var i = 0; i < G.enemies.length; i++) {
+        var e = G.enemies[i];
+        if (e.dead) continue;
+        var dist = Math.hypot(cx - (e.x + e.w/2), cy - (e.y + e.h/2));
+        if (dist < 150) {
+            e.takeDamage(100, (e.x - this.x) > 0 ? 8 : -8);
+            spawnParticles(e.x + e.w/2, e.y + e.h/2, '#ffcc00', 15, 5, 30);
+        }
+    }
+};
+
+Player.prototype.takeDamage = function(amt) {
+    if (this.invincible > 0 || this.state === 'super') return;
+    this.health -= amt;
+    this.invincible = INVINCIBLE_DUR;
+    this.flash = 10;
+    this.state = 'hurt';
+    this.stateTimer = 20;
+    this.vx = -this.facing * 3;
+    this.vy = -4;
+    G.shake = 5;
+    this.charge = Math.min(SUPER_MAX, this.charge + 8);
+    AudioSys.hit();
+    spawnParticles(this.x + this.w/2, this.y + this.h/2, '#ff0000', 10, 3, 20);
+    if (this.health <= 0) {
+        this.health = 0;
+        G.state = 'GAMEOVER';
+        AudioSys.noise(0.5, 0.2);
+    }
+};
+
+Player.prototype.draw = function(cx, cy) {
+    var x = this.x - cx;
+    var y = this.y - cy;
+    var flash = (this.invincible > 0 && Math.floor(Date.now() / 50) % 2 === 0);
+    if (flash) ctx.globalAlpha = 0.5;
+
+    ctx.fillStyle = COL.adaBody;
+    if (this.crouch && this.state !== 'slide') {
+        ctx.fillRect(x + 4, y, 14, 22);
+        ctx.fillStyle = COL.adaDark;
+        ctx.fillRect(x + 3, y - 8, 16, 10);
+        ctx.fillStyle = COL.adaEye;
+        ctx.fillRect(x + 6 + (this.facing > 0 ? 6 : 0), y - 5, 4, 4);
+    } else if (this.state === 'slide') {
+        ctx.fillRect(x, y, 26, 14);
+        ctx.fillStyle = 'rgba(74, 158, 255, 0.3)';
+        ctx.fillRect(x - (this.facing > 0 ? 10 : -10), y + 2, 10, 10);
+        ctx.fillStyle = COL.adaDark;
+        ctx.fillRect(x + 4, y - 6, 18, 8);
+        ctx.fillStyle = COL.adaEye;
+        ctx.fillRect(x + 8 + (this.facing > 0 ? 8 : 0), y - 4, 4, 4);
+    } else {
+        ctx.fillRect(x + 5, y + 8, 12, 22);
+        ctx.fillStyle = COL.adaDark;
+        ctx.fillRect(x + 4, y, 14, 10);
+        ctx.fillStyle = COL.adaEye;
+        ctx.fillRect(x + 6 + (this.facing > 0 ? 6 : 0), y + 3, 4, 4);
+        ctx.fillStyle = '#888888';
+        ctx.fillRect(x + 10, y - 6, 2, 6);
+        ctx.fillStyle = '#ff0000';
+        ctx.fillRect(x + 9, y - 8, 4, 4);
+        ctx.fillStyle = COL.adaDark;
+        var legOff = (this.state === 'walk') ? (this.animFrame % 2 === 0 ? 2 : -2) : 0;
+        ctx.fillRect(x + 5, y + 30, 5, 8 + legOff);
+        ctx.fillRect(x + 12, y + 30, 5, 8 - legOff);
+    }
+
+    ctx.fillStyle = COL.adaBody;
+    if (this.state === 'attack') {
+        var armX = this.facing > 0 ? x + 16 : x - 10;
+        ctx.fillRect(armX, y + 10, 12, 8);
+        ctx.fillStyle = COL.adaAccent;
+        ctx.fillRect(armX + (this.facing > 0 ? 10 : -6), y + 8, 8, 12);
+        ctx.fillStyle = 'rgba(255, 74, 74, 0.5)';
+        ctx.fillRect(armX + (this.facing > 0 ? 16 : -12), y + 6, 8, 16);
+    } else if (this.state === 'airattack') {
+        var armX2 = this.facing > 0 ? x + 16 : x - 8;
+        ctx.fillRect(armX2, y + 18, 10, 14);
+        ctx.fillStyle = COL.adaAccent;
+        ctx.fillRect(armX2 + 2, y + 30, 8, 10);
+        ctx.fillStyle = 'rgba(255, 74, 74, 0.4)';
+        ctx.fillRect(armX2 + 2, y + 36, 8, 8);
+    } else if (this.state === 'super') {
+        ctx.fillStyle = '#ffcc00';
+        ctx.fillRect(x - 6, y + 8, 34, 10);
+        ctx.fillRect(x + 6, y - 6, 10, 34);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(x - 8, y + 10, 4, 6);
+        ctx.fillRect(x + 26, y + 10, 4, 6);
+    } else {
+        var armOff = (this.state === 'walk') ? (this.animFrame % 2 === 0 ? -2 : 2) : 0;
+        ctx.fillRect(x + 1, y + 11 + armOff, 5, 11);
+        ctx.fillRect(x + 16, y + 11 - armOff, 5, 11);
+    }
+
+    if (G.unlockBlaster) {
+        ctx.fillStyle = COL.adaAccent;
+        if (this.crouch && this.state !== 'slide') {
+            ctx.fillRect(x - 3, y + 4, 7, 10);
+            ctx.fillStyle = '#ff2222';
+            ctx.fillRect(x - 5, y + 6, 4, 6);
+        } else if (this.state === 'slide') {
+            ctx.fillRect(x + 2, y - 5, 10, 6);
+            ctx.fillStyle = '#ff2222';
+            ctx.fillRect(x, y - 3, 4, 4);
+        } else {
+            ctx.fillRect(x - 3, y + 11, 7, 11);
+            ctx.fillStyle = '#ff2222';
+            ctx.fillRect(x - 5, y + 13, 4, 7);
+            ctx.fillStyle = '#888888';
+            ctx.fillRect(x - 8, y + 14, 5, 5);
+        }
+    }
+
+    ctx.globalAlpha = 1;
+};
+
+// ==================== ENEMIES ====================
+function Enemy(x, y, w, h, type) {
+    Entity.call(this, x, y, w, h);
+    this.type = type;
+    this.atkCooldown = 0;
+    this.patrolDir = Math.random() > 0.5 ? 1 : -1;
+    this.patrolTimer = 0;
+    this.detectRange = 220;
+    this.attackRange = 45;
+    this.state = 'patrol';
+    this.stateTimer = 0;
+    this.flash = 0;
+    this.weaponSwing = 0;
+}
+Enemy.prototype = Object.create(Entity.prototype);
+Enemy.prototype.constructor = Enemy;
+
+Enemy.prototype.takeDamage = function(amt, knockback) {
+    if (this.invincible > 0) return;
+    this.health -= amt;
+    this.invincible = 12;
+    this.vx = knockback || 0;
+    this.vy = -3;
+    this.flash = 6;
+    this.state = 'hurt';
+    this.stateTimer = 15;
+    if (this.health <= 0) {
+        this.dead = true;
+        G.kills++;
+        spawnParticles(this.x + this.w/2, this.y + this.h/2, this.getColor(), 14, 4, 25);
+        AudioSys.enemyHit();
+    } else {
+        if (this.type === 'boss') AudioSys.bossHit();
+        else AudioSys.enemyHit();
+    }
+};
+
+Enemy.prototype.getColor = function() {
+    switch(this.type) {
+        case 'grunt': return COL.grunt;
+        case 'gunner': return COL.gunner;
+        case 'heavy': return COL.heavy;
+        case 'elite': return COL.elite;
+        case 'boss': return COL.boss;
+        default: return '#ffffff';
+    }
+};
+
+Enemy.prototype.getBodyColor = function() {
+    switch(this.type) {
+        case 'grunt': return '#6b4e0a';
+        case 'gunner': return '#3a4a1f';
+        case 'heavy': return '#3a3a3a';
+        case 'elite': return '#500050';
+        case 'boss': return '#880000';
+        default: return '#444444';
+    }
+};
+
+Enemy.prototype.ai = function() {
+    var p = G.player;
+    var dist = Math.hypot((p.x + p.w/2) - (this.x + this.w/2), (p.y + p.h/2) - (this.y + this.h/2));
+    var canSee = Math.abs((p.y + p.h/2) - (this.y + this.h/2)) < 100;
+
+    if (this.state === 'hurt') {
+        this.stateTimer--;
+        if (this.stateTimer <= 0) this.state = 'patrol';
+        return;
+    }
+
+    if (dist < this.detectRange && canSee) {
+        this.state = 'chase';
+    } else if (this.state === 'chase' && dist > this.detectRange + 120) {
+        this.state = 'patrol';
+    }
+
+    if (this.state === 'patrol') {
+        this.patrolTimer++;
+        if (this.patrolTimer > 120) { this.patrolDir *= -1; this.patrolTimer = 0; }
+        this.vx = this.patrolDir * 0.8;
+        this.facing = this.patrolDir;
+        if (this.wallAhead() || this.ledgeAhead()) this.patrolDir *= -1;
+    } else if (this.state === 'chase') {
+        var dx = (p.x + p.w/2) - (this.x + this.w/2);
+        this.facing = dx > 0 ? 1 : -1;
+    }
+};
+
+Enemy.prototype.wallAhead = function() {
+    var checkX = this.facing > 0 ? this.x + this.w + 2 : this.x - 2;
+    var ty = Math.floor((this.y + this.h/2) / TILE);
+    var tx = Math.floor(checkX / TILE);
+    return getTile(tx, ty) === T_GROUND || getTile(tx, ty) === T_PLAT;
+};
+
+Enemy.prototype.ledgeAhead = function() {
+    var checkX = this.facing > 0 ? this.x + this.w + 4 : this.x - 4;
+    var ty = Math.floor((this.y + this.h + 4) / TILE);
+    var tx = Math.floor(checkX / TILE);
+    return getTile(tx, ty) === T_AIR;
+};
+
+Enemy.prototype.updatePhysics = function() {
+    // Reset grounded every frame. Gravity and the collision pass below will
+    // determine whether the enemy is actually standing on something.
+    this.grounded = false;
+    this.vy += GRAVITY;
+
+    // ---- Horizontal collision ----
+    var oldX = this.x;
+    this.x += this.vx;
+
+    var left = Math.floor(this.x / TILE);
+    var right = Math.floor((this.x + this.w - 0.001) / TILE);
+    var top = Math.floor(this.y / TILE);
+    var bottom = Math.floor((this.y + this.h - 0.001) / TILE);
+
+    for (var ty = top; ty <= bottom; ty++) {
+        for (var tx = left; tx <= right; tx++) {
+            var tile = getTile(tx, ty);
+            if (tile === T_GROUND || tile === T_PLAT) {
+                if (this.vx > 0) {
+                    this.x = tx * TILE - this.w - 0.01;
+                } else if (this.vx < 0) {
+                    this.x = (tx + 1) * TILE + 0.01;
+                } else {
+                    this.x = oldX;
+                }
+                this.vx = 0;
+            }
+        }
+    }
+
+    // ---- Vertical collision ----
+    // Move vertically, then resolve against every solid tile touched by the
+    // enemy. This prevents enemies from tunneling through the floor.
+    var oldY = this.y;
+    var previousBottom = oldY + this.h;
+    this.y += this.vy;
+
+    var left2 = Math.floor(this.x / TILE);
+    var right2 = Math.floor((this.x + this.w - 0.001) / TILE);
+    var top2 = Math.floor(this.y / TILE);
+    var bottom2 = Math.floor((this.y + this.h - 0.001) / TILE);
+
+    for (var ty2 = top2; ty2 <= bottom2; ty2++) {
+        for (var tx2 = left2; tx2 <= right2; tx2++) {
+            var tile2 = getTile(tx2, ty2);
+            if (tile2 !== T_GROUND && tile2 !== T_PLAT) continue;
+
+            var tileTop = ty2 * TILE;
+            var tileBottom = (ty2 + 1) * TILE;
+
+            if (this.vy > 0 && previousBottom <= tileTop + 0.5) {
+                // Falling onto the top of the tile.
+                this.y = tileTop - this.h - 0.01;
+                this.grounded = true;
+                this.vy = 0;
+            } else if (this.vy < 0 && oldY >= tileBottom - 0.5) {
+                // Hitting the underside of a tile.
+                this.y = tileBottom + 0.01;
+                this.vy = 0;
+            }
+        }
+    }
+
+    // Safety net: if an enemy somehow starts inside a floor tile, pull it
+    // back onto the top instead of allowing it to remain underground.
+    if (!this.grounded) {
+        var feetTileY = Math.floor((this.y + this.h) / TILE);
+        var centerX = Math.floor((this.x + this.w / 2) / TILE);
+        if (getTile(centerX, feetTileY) === T_GROUND || getTile(centerX, feetTileY) === T_PLAT) {
+            var tileTop2 = feetTileY * TILE;
+            if (this.y + this.h > tileTop2) {
+                this.y = tileTop2 - this.h - 0.01;
+                this.grounded = true;
+                this.vy = 0;
+            }
+        }
+    }
+
+    // Spikes
+    var spikeLeft = Math.floor((this.x + 2) / TILE);
+    var spikeRight = Math.floor((this.x + this.w - 2) / TILE);
+    var spikeBottom = Math.floor((this.y + this.h) / TILE);
+    for (var tx3 = spikeLeft; tx3 <= spikeRight; tx3++) {
+        if (getTile(tx3, spikeBottom) === T_SPIKE || getTile(tx3, spikeBottom - 1) === T_SPIKE) {
+            this.takeDamage(20, 0);
+            this.vy = -6;
+            this.grounded = false;
+        }
+    }
+
+    // Enemies that somehow leave the level are removed as before.
+    if (this.y > G.level.height * TILE + 50) {
+        this.dead = true;
+        G.kills++;
+    }
+};
+
+
+Enemy.prototype.draw = function(cx, cy) {
+    if (this.dead) return;
+    var x = this.x - cx;
+    var y = this.y - cy;
+    var flash = (this.invincible > 0 && Math.floor(Date.now() / 60) % 2 === 0);
+    if (flash) ctx.globalAlpha = 0.5;
+
+    var bodyColor = this.getBodyColor();
+    var mainColor = this.getColor();
+
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.fillRect(x + 2, y + this.h - 2, this.w - 4, 4);
+
+    ctx.fillStyle = bodyColor;
+    ctx.fillRect(x + 2, y + 8, this.w - 4, this.h - 14);
+
+    ctx.fillStyle = mainColor;
+    ctx.fillRect(x + 4, y + 10, this.w - 8, 12);
+
+    ctx.fillStyle = '#333333';
+    ctx.fillRect(x + 4, y, this.w - 8, 10);
+
+    ctx.fillStyle = '#ff0000';
+    if (this.type === 'boss') {
+        ctx.fillRect(x + 6, y + 3, this.w - 12, 4);
+        ctx.fillStyle = '#660000';
+        ctx.fillRect(x, y - 6, 6, 8);
+        ctx.fillRect(x + this.w - 6, y - 6, 6, 8);
+    } else if (this.type === 'heavy') {
+        ctx.fillRect(x + 4, y + 3, this.w - 8, 4);
+        ctx.fillStyle = '#444444';
+        ctx.fillRect(x + 2, y - 4, this.w - 4, 6);
+    } else if (this.type === 'elite') {
+        ctx.fillRect(x + 6, y + 3, this.w - 12, 4);
+        ctx.fillStyle = '#300030';
+        ctx.fillRect(x + 3, y + 7, this.w - 6, 5);
+    } else if (this.type === 'gunner') {
+        ctx.fillRect(x + 6, y + 3, this.w - 12, 4);
+        ctx.fillStyle = '#00ff00';
+        ctx.fillRect(x + 5, y + 2, 6, 4);
+        ctx.fillRect(x + 13, y + 2, 6, 4);
+    } else {
+        ctx.fillRect(x + 6, y + 3, this.w - 12, 4);
+    }
+
+    ctx.fillStyle = '#222222';
+    var legW = Math.floor((this.w - 6) / 2);
+    var legOff = (Math.abs(this.vx) > 0.5) ? (this.animFrame % 2 === 0 ? 2 : -2) : 0;
+    ctx.fillRect(x + 3, y + this.h - 12, legW, 10 + legOff);
+    ctx.fillRect(x + 3 + legW + 1, y + this.h - 12, legW, 10 - legOff);
+
+    if (this.type === 'gunner') {
+        ctx.fillStyle = '#444444';
+        var gunX = this.facing > 0 ? x + this.w - 2 : x - 8;
+        ctx.fillRect(gunX, y + 14, 10, 4);
+        ctx.fillStyle = '#222222';
+        ctx.fillRect(gunX + (this.facing > 0 ? 8 : -2), y + 12, 4, 8);
+    } else if (this.type === 'heavy') {
+        ctx.fillStyle = '#555555';
+        var hammerX = this.facing > 0 ? x + this.w : x - 10;
+        ctx.fillRect(hammerX, y + 8, 8, 18);
+        ctx.fillStyle = '#777777';
+        ctx.fillRect(hammerX - 2, y + 24, 12, 6);
+    } else if (this.type === 'elite') {
+        ctx.fillStyle = '#aa00aa';
+        var bladeX = this.facing > 0 ? x + this.w - 2 : x - 10;
+        ctx.fillRect(bladeX, y + 10, 10, 3);
+        ctx.fillStyle = '#ff00ff';
+        ctx.fillRect(bladeX + (this.facing > 0 ? 8 : -4), y + 6, 4, 14);
+    } else if (this.type === 'grunt') {
+        ctx.fillStyle = '#666666';
+        var batX = this.facing > 0 ? x + this.w - 2 : x - 8;
+        ctx.fillRect(batX, y + 12, 8, 3);
+        ctx.fillStyle = '#888888';
+        ctx.fillRect(batX + (this.facing > 0 ? 6 : -2), y + 8, 4, 12);
+    } else if (this.type === 'boss') {
+        ctx.fillStyle = '#ff0000';
+        var swordX = this.facing > 0 ? x + this.w : x - 14;
+        ctx.fillRect(swordX, y + 16, 14, 6);
+        ctx.fillStyle = '#ff4444';
+        ctx.fillRect(swordX + (this.facing > 0 ? 10 : -6), y + 8, 8, 20);
+        ctx.fillStyle = 'rgba(255, 0, 0, 0.3)';
+        ctx.fillRect(swordX + (this.facing > 0 ? 10 : -6), y + 6, 8, 24);
+    }
+
+    if (this.weaponSwing > 0) {
+        this.weaponSwing--;
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+        var swingX = this.facing > 0 ? x + this.w + 5 : x - 15;
+        ctx.fillRect(swingX, y + 8, 15, 20);
+    }
+
+    if (this.type === 'heavy' || this.type === 'elite' || this.type === 'boss') {
+        var bw = this.w + 8;
+        var bh = 5;
+        ctx.fillStyle = COL.hpBg;
+        ctx.fillRect(x - 4, y - 10, bw, bh);
+        ctx.fillStyle = this.type === 'boss' ? '#ff0000' : COL.hpBar;
+        var hpPct = Math.max(0, this.health / this.maxHealth);
+        ctx.fillRect(x - 4, y - 10, bw * hpPct, bh);
+        ctx.strokeStyle = '#000000';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(x - 4, y - 10, bw, bh);
+    }
+
+    ctx.globalAlpha = 1;
+};
+
+// ==================== GRUNT ====================
+function Grunt(x, y) {
+    Enemy.call(this, x, y, 24, 36, 'grunt');
+    this.health = 50; this.maxHealth = 50;
+    this.speed = 1.3;
+}
+Grunt.prototype = Object.create(Enemy.prototype);
+Grunt.prototype.constructor = Grunt;
+
+Grunt.prototype.update = function() {
+    if (this.dead) return;
+    if (this.invincible > 0) this.invincible--;
+    this.ai();
+    if (this.state === 'chase') {
+        var dx = (G.player.x + G.player.w/2) - (this.x + this.w/2);
+        this.vx = (dx > 0 ? 1 : -1) * this.speed;
+        this.facing = dx > 0 ? 1 : -1;
+        if (Math.abs(dx) < this.attackRange && this.atkCooldown <= 0) {
+            this.atkCooldown = 70;
+            this.weaponSwing = 12;
+            if (rectIntersect(this.rect(), G.player.rect())) {
+                G.player.takeDamage(10);
+                spawnParticles(G.player.x + G.player.w/2, G.player.y + 10, '#ff8800', 5, 2, 10);
+            }
+        }
+    }
+    if (this.atkCooldown > 0) this.atkCooldown--;
+    this.updatePhysics();
+    this.updateAnim();
+};
+
+// ==================== GUNNER ====================
+function Gunner(x, y) {
+    Enemy.call(this, x, y, 24, 36, 'gunner');
+    this.health = 40; this.maxHealth = 40;
+    this.speed = 0.9;
+    this.shootCooldown = 0;
+}
+Gunner.prototype = Object.create(Enemy.prototype);
+Gunner.prototype.constructor = Gunner;
+
+Gunner.prototype.update = function() {
+    if (this.dead) return;
+    if (this.invincible > 0) this.invincible--;
+    this.ai();
+    var p = G.player;
+    var dx = (p.x + p.w/2) - (this.x + this.w/2);
+    var dist = Math.abs(dx);
+
+    if (this.state === 'chase') {
+        this.facing = dx > 0 ? 1 : -1;
+        if (dist < 80) {
+            this.vx = (dx > 0 ? -1 : 1) * this.speed;
+        } else if (dist > 220) {
+            this.vx = (dx > 0 ? 1 : -1) * this.speed;
+        } else {
+            this.vx = 0;
+        }
+        if (this.shootCooldown <= 0 && dist < 260 && Math.abs((p.y + p.h/2) - (this.y + this.h/2)) < 70) {
+            this.shootCooldown = 90;
+            this.weaponSwing = 8;
+            var px = this.facing > 0 ? this.x + this.w : this.x;
+            var py = this.y + this.h/2;
+            G.projectiles.push(new Projectile(px, py, this.facing * 4.5, 0, 'enemy', 8));
+            AudioSys.enemyShoot();
+            spawnParticles(px, py, '#ff4444', 3, 1, 8);
+        }
+    }
+    if (this.shootCooldown > 0) this.shootCooldown--;
+    this.updatePhysics();
+    this.updateAnim();
+};
+
+// ==================== HEAVY ====================
+function Heavy(x, y) {
+    Enemy.call(this, x, y, 34, 42, 'heavy');
+    this.health = 140; this.maxHealth = 140;
+    this.speed = 0.7;
+    this.chargeTimer = 0;
+}
+Heavy.prototype = Object.create(Enemy.prototype);
+Heavy.prototype.constructor = Heavy;
+
+Heavy.prototype.update = function() {
+    if (this.dead) return;
+    if (this.invincible > 0) this.invincible--;
+    this.ai();
+    var p = G.player;
+    var dx = (p.x + p.w/2) - (this.x + this.w/2);
+
+    if (this.state === 'chase') {
+        this.facing = dx > 0 ? 1 : -1;
+        if (this.chargeTimer > 0) {
+            this.chargeTimer--;
+            this.vx = this.facing * 4;
+            this.weaponSwing = 10;
+            if (rectIntersect(this.rect(), p.rect())) {
+                p.takeDamage(22);
+                this.chargeTimer = 0;
+                spawnParticles(p.x + p.w/2, p.y + 10, '#ff4444', 8, 3, 15);
+            }
+        } else if (Math.abs(dx) < 110) {
+            this.chargeTimer = 45;
+            this.vx = 0;
+            spawnParticles(this.x + this.w/2, this.y, '#ff8800', 6, 2, 15);
+        } else {
+            this.vx = (dx > 0 ? 1 : -1) * this.speed;
+        }
+    }
+    this.updatePhysics();
+    this.updateAnim();
+};
+
+// ==================== ELITE ====================
+function Elite(x, y) {
+    Enemy.call(this, x, y, 26, 38, 'elite');
+    this.health = 90; this.maxHealth = 90;
+    this.speed = 2.4;
+    this.combo = 0;
+}
+Elite.prototype = Object.create(Enemy.prototype);
+Elite.prototype.constructor = Elite;
+
+Elite.prototype.update = function() {
+    if (this.dead) return;
+    if (this.invincible > 0) this.invincible--;
+    this.ai();
+    var p = G.player;
+    var dx = (p.x + p.w/2) - (this.x + this.w/2);
+
+    if (this.state === 'chase') {
+        this.facing = dx > 0 ? 1 : -1;
+        this.vx = (dx > 0 ? 1 : -1) * this.speed;
+        if (Math.abs(dx) < this.attackRange && this.atkCooldown <= 0) {
+            this.atkCooldown = 45;
+            this.combo++;
+            this.weaponSwing = 10;
+            if (rectIntersect(this.rect(), p.rect())) {
+                p.takeDamage(14);
+                spawnParticles(p.x + p.w/2, p.y + 10, '#ff00ff', 5, 2, 10);
+            }
+            if (this.combo >= 3) { this.combo = 0; this.atkCooldown = 80; }
+        }
+    }
+    if (this.atkCooldown > 0) this.atkCooldown--;
+    this.updatePhysics();
+    this.updateAnim();
+};
+
+// ==================== BOSS ====================
+function Boss(x, y) {
+    Enemy.call(this, x, y, 52, 68, 'boss');
+    this.health = 600; this.maxHealth = 600;
+    this.speed = 1.6;
+    this.phase = 1;
+    this.summonTimer = 0;
+    this.dashTimer = 0;
+}
+Boss.prototype = Object.create(Enemy.prototype);
+Boss.prototype.constructor = Boss;
+
+Boss.prototype.update = function() {
+    if (this.dead) return;
+    if (this.invincible > 0) this.invincible--;
+
+    var oldPhase = this.phase;
+    if (this.health < 200) this.phase = 3;
+    else if (this.health < 400) this.phase = 2;
+    else this.phase = 1;
+    if (oldPhase !== this.phase) {
+        G.shake = 10;
+        AudioSys.bossHit();
+        spawnParticles(this.x + this.w/2, this.y + this.h/2, '#ff0000', 25, 6, 50);
+    }
+
+    var p = G.player;
+    var dx = (p.x + p.w/2) - (this.x + this.w/2);
+    var dist = Math.abs(dx);
+    this.facing = dx > 0 ? 1 : -1;
+
+    if (this.phase === 1) {
+        if (dist > 60) this.vx = (dx > 0 ? 1 : -1) * this.speed;
+        else this.vx = 0;
+        if (this.atkCooldown <= 0 && dist < 90) {
+            this.atkCooldown = 65;
+            this.weaponSwing = 15;
+            if (rectIntersect(this.rect(), p.rect())) {
+                p.takeDamage(18);
+                spawnParticles(p.x + p.w/2, p.y + 10, '#ff0000', 8, 3, 15);
+            }
+        }
+    } else if (this.phase === 2) {
+        if (dist > 100) this.vx = (dx > 0 ? 1 : -1) * this.speed * 0.8;
+        else this.vx = 0;
+        if (this.summonTimer <= 0) {
+            this.summonTimer = 220;
+            G.enemies.push(new Grunt(this.x + (Math.random() > 0.5 ? 70 : -70), this.y));
+            G.enemies.push(new Grunt(this.x + (Math.random() > 0.5 ? 90 : -90), this.y));
+            spawnParticles(this.x + this.w/2, this.y, '#8b6914', 12, 4, 25);
+        }
+        if (this.atkCooldown <= 0) {
+            this.atkCooldown = 80;
+            this.weaponSwing = 10;
+            var px = this.facing > 0 ? this.x + this.w : this.x;
+            G.projectiles.push(new Projectile(px, this.y + 24, this.facing * 5.5, 0, 'enemy', 14));
+            AudioSys.enemyShoot();
+            spawnParticles(px, this.y + 24, '#ff0000', 5, 2, 10);
+        }
+    } else {
+        this.vx = (dx > 0 ? 1 : -1) * this.speed * 2;
+        if (this.dashTimer <= 0 && dist < 160) {
+            this.dashTimer = 55;
+            this.vx = this.facing * 8;
+            this.weaponSwing = 20;
+            G.shake = 4;
+            spawnParticles(this.x + this.w/2, this.y + this.h, '#ff4444', 8, 3, 15);
+        }
+        if (this.dashTimer > 0) this.dashTimer--;
+        if (rectIntersect(this.rect(), p.rect())) {
+            p.takeDamage(28);
+            spawnParticles(p.x + p.w/2, p.y + 10, '#ff0000', 10, 4, 15);
+        }
+    }
+
+    if (this.atkCooldown > 0) this.atkCooldown--;
+    if (this.summonTimer > 0) this.summonTimer--;
+    this.updatePhysics();
+    this.updateAnim();
+};
+
+// ==================== PROJECTILES ====================
+function Projectile(x, y, vx, vy, owner, damage) {
+    this.x = x; this.y = y;
+    this.vx = vx; this.vy = vy;
+    this.owner = owner;
+    this.damage = damage;
+    this.life = 120;
+    this.w = 8; this.h = 4;
+}
+
+Projectile.prototype.update = function() {
+    this.x += this.vx;
+    this.y += this.vy;
+    this.life--;
+
+    var tx = Math.floor((this.x + this.w/2) / TILE);
+    var ty = Math.floor((this.y + this.h/2) / TILE);
+    if (getTile(tx, ty) === T_GROUND || getTile(tx, ty) === T_PLAT) {
+        this.life = 0;
+        spawnParticles(this.x, this.y, this.owner === 'player' ? '#00ffff' : '#ff4444', 5, 2, 10);
+    }
+
+    if (this.owner === 'player') {
+        for (var i = 0; i < G.enemies.length; i++) {
+            var e = G.enemies[i];
+            if (e.dead) continue;
+            if (rectIntersect(this.rect(), e.rect())) {
+                e.takeDamage(this.damage, this.vx > 0 ? 2 : -2);
+                this.life = 0;
+                G.player.charge = Math.min(SUPER_MAX, G.player.charge + 8);
+                spawnParticles(this.x, this.y, '#00ffff', 6, 2, 10);
+                break;
+            }
+        }
+    } else {
+        var p = G.player;
+        if (rectIntersect(this.rect(), p.rect())) {
+            p.takeDamage(this.damage);
+            this.life = 0;
+            spawnParticles(this.x, this.y, '#ff4444', 6, 2, 10);
+        }
+    }
+};
+
+Projectile.prototype.rect = function() { return { x: this.x, y: this.y, w: this.w, h: this.h }; };
+
+Projectile.prototype.draw = function(cx, cy) {
+    ctx.fillStyle = this.owner === 'player' ? COL.projPlayer : COL.projEnemy;
+    ctx.fillRect(this.x - cx, this.y - cy, this.w, this.h);
+    ctx.fillStyle = this.owner === 'player' ? 'rgba(0,255,255,0.5)' : 'rgba(255,68,68,0.5)';
+    ctx.fillRect(this.x - cx - (this.vx > 0 ? 6 : -6), this.y - cy + 1, 6, 2);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(this.x - cx + (this.vx > 0 ? 0 : 4), this.y - cy + 1, 4, 2);
+};
+
+// ==================== UTILITIES ====================
+function getTile(tx, ty) {
+    if (!G.level) return T_AIR;
+    if (ty < 0 || ty >= G.level.height || tx < 0 || tx >= G.level.width) return T_AIR;
+    return G.level.tiles[ty][tx];
+}
+
+function rectIntersect(r1, r2) {
+    return r1.x < r2.x + r2.w && r1.x + r1.w > r2.x &&
+           r1.y < r2.y + r2.h && r1.y + r1.h > r2.y;
+}
+
+function drawTile(tx, ty, cx, cy) {
+    var x = tx * TILE - cx;
+    var y = ty * TILE - cy;
+    var t = getTile(tx, ty);
+    if (t === T_AIR) return;
+    if (t === T_GROUND) {
+        ctx.fillStyle = COL.ground;
+        ctx.fillRect(x, y, TILE, TILE);
+        ctx.fillStyle = COL.groundTop;
+        ctx.fillRect(x, y, TILE, 4);
+        ctx.fillStyle = '#1a1a2a';
+        ctx.fillRect(x + 4, y + 8, 6, 5);
+        ctx.fillRect(x + 18, y + 8, 8, 5);
+        ctx.fillRect(x + 4, y + 18, 10, 5);
+        ctx.fillRect(x + 20, y + 18, 6, 5);
+        ctx.fillRect(x + 10, y + 24, 12, 4);
+    } else if (t === T_PLAT) {
+        ctx.fillStyle = COL.plat;
+        ctx.fillRect(x, y, TILE, TILE);
+        ctx.fillStyle = '#5a5a6a';
+        ctx.fillRect(x, y, TILE, 3);
+        ctx.fillStyle = '#3a3a4a';
+        ctx.fillRect(x + 4, y + 10, TILE - 8, 2);
+        ctx.fillRect(x + 4, y + 18, TILE - 8, 2);
+    } else if (t === T_SPIKE) {
+        ctx.fillStyle = COL.spike;
+        ctx.beginPath();
+        ctx.moveTo(x, y + TILE);
+        ctx.lineTo(x + TILE/2, y);
+        ctx.lineTo(x + TILE, y + TILE);
+        ctx.fill();
+        ctx.fillStyle = '#ff6666';
+        ctx.beginPath();
+        ctx.moveTo(x + 8, y + TILE);
+        ctx.lineTo(x + TILE/2, y + 6);
+        ctx.lineTo(x + TILE - 8, y + TILE);
+        ctx.fill();
+    } else if (t === T_CHECK) {
+        ctx.fillStyle = '#003300';
+        ctx.fillRect(x, y, TILE, TILE);
+        ctx.fillStyle = '#00ff00';
+        ctx.fillRect(x + 8, y + 8, 16, 16);
+        ctx.fillStyle = '#000000';
+        ctx.fillRect(x + 12, y + 4, 8, 24);
+        ctx.fillRect(x + 4, y + 12, 24, 8);
+        ctx.fillStyle = 'rgba(0, 255, 0, 0.2)';
+        ctx.fillRect(x - 4, y - 4, TILE + 8, TILE + 8);
+    } else if (t === T_DOOR) {
+        ctx.fillStyle = '#222244';
+        ctx.fillRect(x + 2, y, 28, TILE);
+        ctx.fillStyle = '#4444aa';
+        ctx.fillRect(x + 6, y + 4, 20, 24);
+        ctx.fillStyle = '#6666ff';
+        ctx.fillRect(x + 8, y + 6, 16, 20);
+        ctx.fillStyle = '#00ffcc';
+        ctx.fillRect(x + 14, y + 14, 4, 4);
+        ctx.fillStyle = '#8888ff';
+        ctx.fillRect(x + 4, y, 2, TILE);
+        ctx.fillRect(x + 26, y, 2, TILE);
+    }
+}
+
+function drawLevel(cx, cy) {
+    if (!G.level) return;
+    var startX = Math.max(0, Math.floor(cx / TILE) - 1);
+    var endX = Math.min(G.level.width - 1, Math.ceil((cx + SCREEN_W) / TILE) + 1);
+    var startY = Math.max(0, Math.floor(cy / TILE) - 1);
+    var endY = Math.min(G.level.height - 1, Math.ceil((cy + SCREEN_H) / TILE) + 1);
+
+    for (var ty = startY; ty <= endY; ty++) {
+        for (var tx = startX; tx <= endX; tx++) {
+            drawTile(tx, ty, cx, cy);
+        }
+    }
+}
+
+// ==================== THEMED BACKGROUNDS ====================
+function drawBackground(cx, cy) {
+    if (!G.level) return;
+    var theme = G.level.theme;
+
+    ctx.fillStyle = COL.bg;
+    ctx.fillRect(0, 0, SCREEN_W, SCREEN_H);
+
+    if (theme === 'alley') {
+        ctx.fillStyle = '#0a0a15';
+        for (var i = 0; i < 20; i++) {
+            var bx = ((i * 87 - cx * 0.2) % (SCREEN_W + 100)) - 50;
+            var bh = 200 + (i * 37) % 250;
+            ctx.fillRect(bx, SCREEN_H - bh, 60, bh);
+            ctx.fillStyle = '#1a1a25';
+            for (var w = 0; w < 5; w++) {
+                for (var h = 0; h < 8; h++) {
+                    if ((i + w + h) % 3 === 0) {
+                        ctx.fillRect(bx + 8 + w * 10, SCREEN_H - bh + 10 + h * 25, 6, 14);
+                    }
+                }
+            }
+            ctx.fillStyle = '#0a0a15';
+        }
+        ctx.fillStyle = 'rgba(255, 0, 80, 0.15)';
+        ctx.fillRect(100, 200, 80, 20);
+        ctx.fillStyle = 'rgba(0, 255, 200, 0.1)';
+        ctx.fillRect(400, 150, 60, 15);
+
+    } else if (theme === 'streets') {
+        ctx.fillStyle = '#0d0d18';
+        for (var i = 0; i < 15; i++) {
+            var bx = ((i * 120 - cx * 0.15) % (SCREEN_W + 200)) - 100;
+            var bh = 150 + (i * 53) % 200;
+            var bw = 40 + (i * 17) % 60;
+            ctx.fillRect(bx, SCREEN_H - bh, bw, bh);
+            ctx.fillStyle = '#1a1010';
+            for (var w = 0; w < 3; w++) {
+                for (var h = 0; h < 6; h++) {
+                    if ((i * w * h) % 5 !== 0) {
+                        ctx.fillRect(bx + 5 + w * 12, SCREEN_H - bh + 10 + h * 28, 8, 18);
+                    }
+                }
+            }
+            ctx.fillStyle = '#0d0d18';
+        }
+        ctx.fillStyle = 'rgba(80, 60, 40, 0.08)';
+        for (var i = 0; i < 8; i++) {
+            var sx = ((i * 200 + G.gameTime * 0.3) % (SCREEN_W + 100)) - 50;
+            var sy = 100 + Math.sin(G.gameTime * 0.01 + i) * 50;
+            ctx.beginPath();
+            ctx.arc(sx, sy, 30 + i * 5, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+    } else if (theme === 'factory') {
+        ctx.fillStyle = '#0f0f18';
+        for (var i = 0; i < 12; i++) {
+            var bx = ((i * 150 - cx * 0.1) % (SCREEN_W + 200)) - 100;
+            ctx.fillRect(bx, 100, 20, SCREEN_H - 100);
+            ctx.fillStyle = '#2a2a35';
+            ctx.fillRect(bx - 5, 150 + i * 30, 30, 6);
+            ctx.fillStyle = '#0f0f18';
+        }
+        ctx.fillStyle = 'rgba(255, 100, 0, 0.1)';
+        ctx.fillRect(200, 300, 100, 80);
+        ctx.fillStyle = 'rgba(255, 150, 0, 0.15)';
+        ctx.fillRect(500, 250, 80, 100);
+
+    } else if (theme === 'sewer') {
+        ctx.fillStyle = '#0a120a';
+        ctx.fillRect(0, 0, SCREEN_W, SCREEN_H);
+        ctx.fillStyle = '#1a251a';
+        for (var i = 0; i < 15; i++) {
+            var px = ((i * 90 - cx * 0.1) % (SCREEN_W + 100)) - 50;
+            ctx.fillRect(px, 0, 15, 40);
+            ctx.fillRect(px + 5, 40, 5, 20);
+        }
+        ctx.fillStyle = 'rgba(0, 255, 50, 0.03)';
+        for (var i = 0; i < 10; i++) {
+            var wx = ((i * 150 + G.gameTime * 0.5) % (SCREEN_W + 100)) - 50;
+            ctx.fillRect(wx, SCREEN_H - 60, 80, 20);
+        }
+        if (Math.random() > 0.97) {
+            spawnParticles(cx + Math.random() * SCREEN_W, cy + 40, '#00ff33', 1, 1, 20);
+        }
+
+    } else if (theme === 'downtown') {
+        ctx.fillStyle = '#0c0c18';
+        for (var i = 0; i < 18; i++) {
+            var bx = ((i * 70 - cx * 0.25) % (SCREEN_W + 150)) - 75;
+            var bh = 100 + (i * 41) % 350;
+            var broken = (i % 3 === 0);
+            ctx.fillRect(bx, SCREEN_H - bh, 50, bh);
+            if (broken) {
+                ctx.fillStyle = COL.bg;
+                ctx.fillRect(bx + 10, SCREEN_H - bh + 20, 30, 40);
+                ctx.fillRect(bx + 5, SCREEN_H - bh + 80, 20, 30);
+            }
+            ctx.fillStyle = '#0c0c18';
+        }
+        ctx.fillStyle = 'rgba(255, 80, 0, 0.08)';
+        ctx.fillRect(100, 350, 150, 100);
+        ctx.fillStyle = 'rgba(255, 120, 0, 0.06)';
+        ctx.fillRect(500, 300, 120, 120);
+
+    } else if (theme === 'bridge') {
+        ctx.fillStyle = '#080818';
+        ctx.fillRect(0, 0, SCREEN_W, SCREEN_H);
+        ctx.strokeStyle = 'rgba(150, 150, 200, 0.1)';
+        ctx.lineWidth = 1;
+        for (var i = 0; i < 40; i++) {
+            var rx = ((i * 47 + G.gameTime * 3) % (SCREEN_W + 50)) - 25;
+            var ry = ((i * 89 + G.gameTime * 8) % (SCREEN_H + 50)) - 25;
+            ctx.beginPath();
+            ctx.moveTo(rx, ry);
+            ctx.lineTo(rx - 5, ry + 15);
+            ctx.stroke();
+        }
+        ctx.strokeStyle = '#1a1a2a';
+        ctx.lineWidth = 3;
+        for (var i = 0; i < 8; i++) {
+            var cx2 = i * 120;
+            ctx.beginPath();
+            ctx.moveTo(cx2, 0);
+            ctx.lineTo(cx2 + 60, SCREEN_H);
+            ctx.stroke();
+        }
+
+    } else if (theme === 'industrial') {
+        ctx.fillStyle = '#0d0d15';
+        for (var i = 0; i < 10; i++) {
+            var bx = ((i * 180 - cx * 0.08) % (SCREEN_W + 300)) - 150;
+            ctx.fillRect(bx, 50, 40, SCREEN_H - 50);
+            ctx.fillStyle = '#1a1a25';
+            ctx.fillRect(bx - 20, 200 + (i * 37) % 300, 80, 8);
+            ctx.fillStyle = '#0d0d15';
+        }
+        ctx.fillStyle = '#2a2a20';
+        for (var i = 0; i < 5; i++) {
+            var by = 150 + i * 90;
+            ctx.fillRect(0, by, SCREEN_W, 10);
+        }
+
+    } else if (theme === 'wasteland') {
+        ctx.fillStyle = '#15100a';
+        ctx.fillRect(0, 0, SCREEN_W, SCREEN_H);
+        ctx.fillStyle = '#1a1410';
+        for (var i = 0; i < 20; i++) {
+            var rx = ((i * 67 - cx * 0.15) % (SCREEN_W + 100)) - 50;
+            var rh = 20 + (i * 13) % 60;
+            ctx.fillRect(rx, SCREEN_H - rh - 50, 30 + (i * 7) % 40, rh);
+        }
+        ctx.fillStyle = 'rgba(255, 100, 0, 0.03)';
+        for (var i = 0; i < 6; i++) {
+            var hx = ((i * 200 + Math.sin(G.gameTime * 0.02 + i) * 30) % (SCREEN_W + 100)) - 50;
+            ctx.fillRect(hx, 300, 100, 80);
+        }
+        ctx.fillStyle = 'rgba(200, 150, 100, 0.05)';
+        for (var i = 0; i < 15; i++) {
+            var dx = ((i * 137 + G.gameTime * 0.5) % (SCREEN_W + 100)) - 50;
+            var dy = 400 + (i * 23) % 150;
+            ctx.fillRect(dx, dy, 20, 4);
+        }
+
+    } else if (theme === 'camp') {
+        ctx.fillStyle = '#0a0f0a';
+        ctx.fillRect(0, 0, SCREEN_W, SCREEN_H);
+        ctx.fillStyle = '#0a150a';
+        for (var i = 0; i < 12; i++) {
+            var tx = ((i * 100 - cx * 0.12) % (SCREEN_W + 100)) - 50;
+            ctx.fillRect(tx + 10, 200, 10, SCREEN_H - 200);
+            ctx.fillStyle = '#0a1a0a';
+            ctx.fillRect(tx - 10, 150, 50, 80);
+            ctx.fillStyle = '#0a150a';
+        }
+        ctx.fillStyle = '#1a2010';
+        for (var i = 0; i < 6; i++) {
+            var tx = ((i * 200 - cx * 0.2) % (SCREEN_W + 200)) - 100;
+            ctx.beginPath();
+            ctx.moveTo(tx, SCREEN_H - 80);
+            ctx.lineTo(tx + 40, SCREEN_H - 140);
+            ctx.lineTo(tx + 80, SCREEN_H - 80);
+            ctx.fill();
+        }
+        ctx.fillStyle = 'rgba(255, 100, 0, 0.15)';
+        for (var i = 0; i < 4; i++) {
+            var fx = ((i * 250 - cx * 0.2) % (SCREEN_W + 200)) - 100;
+            ctx.fillRect(fx + 30, SCREEN_H - 90, 20, 20);
+        }
+
+    } else if (theme === 'base') {
+        ctx.fillStyle = '#080818';
+        ctx.fillRect(0, 0, SCREEN_W, SCREEN_H);
+        ctx.fillStyle = '#0a0a20';
+        for (var i = 0; i < 15; i++) {
+            var bx = ((i * 80 - cx * 0.1) % (SCREEN_W + 100)) - 50;
+            ctx.fillRect(bx, 100, 30, SCREEN_H - 100);
+            ctx.fillStyle = (Math.floor(G.gameTime / 20 + i) % 4 === 0) ? 'rgba(0,255,0,0.3)' : 'rgba(0,100,0,0.1)';
+            ctx.fillRect(bx + 5, 120 + (i * 30) % 350, 4, 4);
+            ctx.fillRect(bx + 20, 120 + (i * 37) % 350, 4, 4);
+            ctx.fillStyle = '#0a0a20';
+        }
+        ctx.fillStyle = 'rgba(0, 200, 255, 0.05)';
+        ctx.fillRect(150, 200, 200, 100);
+        ctx.fillRect(500, 150, 150, 120);
+
+    } else if (theme === 'boss') {
+        ctx.fillStyle = '#0a0000';
+        ctx.fillRect(0, 0, SCREEN_W, SCREEN_H);
+        ctx.fillStyle = '#1a0505';
+        for (var i = 0; i < 6; i++) {
+            var px = i * 160;
+            ctx.fillRect(px, 0, 30, SCREEN_H);
+        }
+        var glowIntensity = 0.1 + Math.sin(G.gameTime * 0.03) * 0.05;
+        ctx.fillStyle = 'rgba(255, 0, 0, ' + glowIntensity + ')';
+        ctx.fillRect(SCREEN_W/2 - 150, SCREEN_H/2 - 100, 300, 200);
+        ctx.strokeStyle = '#330000';
+        ctx.lineWidth = 2;
+        for (var i = 0; i < 5; i++) {
+            var cx2 = 100 + i * 150;
+            ctx.beginPath();
+            ctx.moveTo(cx2, 0);
+            ctx.lineTo(cx2 + 20, SCREEN_H);
+            ctx.stroke();
+        }
+
+    } else if (theme === 'openworld') {
+        ctx.fillStyle = '#120d08';
+        ctx.fillRect(0, 0, SCREEN_W, SCREEN_H);
+        ctx.fillStyle = '#1a1410';
+        for (var i = 0; i < 15; i++) {
+            var mx = ((i * 90 - cx * 0.05) % (SCREEN_W + 200)) - 100;
+            var mh = 80 + (i * 23) % 200;
+            ctx.beginPath();
+            ctx.moveTo(mx, SCREEN_H);
+            ctx.lineTo(mx + 60, SCREEN_H - mh);
+            ctx.lineTo(mx + 120, SCREEN_H);
+            ctx.fill();
+        }
+        ctx.fillStyle = 'rgba(255, 100, 0, 0.1)';
+        ctx.beginPath();
+        ctx.arc(SCREEN_W - 100, 100, 60, 0, Math.PI * 2);
+        ctx.fill();
+    }
+}
+
+// ==================== CUTSCENES ====================
+var CUTSCENES = {
+    intro: [
+        { speaker: 'Ada', text: '...', side: 'left', color: '#4a9eff' },
+        { speaker: 'Ada', text: 'My name... is Ada.', side: 'left', color: '#4a9eff' },
+        { speaker: 'Ada', text: 'I remember that much. But everything else... static.', side: 'left', color: '#4a9eff' },
+        { speaker: 'Ada', text: 'An alley. Broken glass. Rain.', side: 'left', color: '#4a9eff' },
+        { speaker: 'Ada', text: 'I know how to fight. I can feel it. Muscle memory... or whatever passes for it in a machine.', side: 'left', color: '#4a9eff' },
+        { speaker: 'Ada', text: 'My head feels hollow. Something is missing. A drive. My memory drive.', side: 'left', color: '#4a9eff' },
+        { speaker: 'Ada', text: 'I need to find it. I need to remember who I am.', side: 'left', color: '#4a9eff' },
+        { speaker: 'SYSTEM', text: 'WASD to move. SPACE to jump. E to attack. S to crouch, hold while moving to slide.', side: 'left', color: '#aaaaaa' },
+        { speaker: 'SYSTEM', text: 'F for super attack when charged. Q to shoot blaster (once repaired). ESC to pause and save.', side: 'left', color: '#aaaaaa' }
+    ],
+    after2: [
+        { speaker: 'Ada', text: 'They keep coming. Who are these people?', side: 'left', color: '#4a9eff' },
+        { speaker: 'Resistance Grunt', text: 'Stop right there, machine!', side: 'right', color: '#8b6914' },
+        { speaker: 'Ada', text: 'Machine? I am just looking for my memories.', side: 'left', color: '#4a9eff' },
+        { speaker: 'Resistance Grunt', text: 'Your "memories"?! You mean the weapon protocols you used to destroy our city?!', side: 'right', color: '#8b6914' },
+        { speaker: 'Ada', text: 'What...? No. I do not remember any of that.', side: 'left', color: '#4a9eff' },
+        { speaker: 'Resistance Grunt', text: 'The Resistance will never fall! Keep moving and you will face our full force!', side: 'right', color: '#8b6914' }
+    ],
+    after5: [
+        { speaker: 'Ada', text: 'What is this...? My arm...', side: 'left', color: '#4a9eff' },
+        { speaker: 'Ada', text: 'It is a weapon. Part of me. A blaster cannon. It is broken but... I can fix it.', side: 'left', color: '#4a9eff' },
+        { speaker: 'Ada', text: '*mechanical whirring, sparks*', side: 'left', color: '#aaaaaa' },
+        { speaker: 'Ada', text: 'There. A blaster. I can feel it now. Press Q to fire.', side: 'left', color: '#4a9eff' },
+        { speaker: 'Ada', text: 'Why do I have weapons built into my body...?', side: 'left', color: '#4a9eff' }
+    ],
+    after8: [
+        { speaker: 'Ada', text: 'I am getting closer to their base. I can feel it.', side: 'left', color: '#4a9eff' },
+        { speaker: 'Ada', text: 'These people... they fight with such desperation. Like they are protecting something sacred.', side: 'left', color: '#4a9eff' },
+        { speaker: 'Resistance Elite', text: 'You do not even know what you are, do you?', side: 'right', color: '#800080' },
+        { speaker: 'Ada', text: 'Tell me! What am I?!', side: 'left', color: '#4a9eff' },
+        { speaker: 'Resistance Elite', text: 'You will find out soon enough. Our Leader is waiting for you.', side: 'right', color: '#800080' }
+    ],
+    beforeBoss: [
+        { speaker: 'Ada', text: 'This is it. The heart of their operation.', side: 'left', color: '#4a9eff' },
+        { speaker: 'The Leader', text: 'So. You have come.', side: 'right', color: '#cc0000' },
+        { speaker: 'Ada', text: 'You are the one who has my drive. My memories.', side: 'left', color: '#4a9eff' },
+        { speaker: 'The Leader', text: 'Memories? Is that what you think we took?', side: 'right', color: '#cc0000' },
+        { speaker: 'The Leader', text: 'We took your WEAPON PROTOCOLS. Your TARGETING SYSTEMS. Your MISSION PARAMETERS.', side: 'right', color: '#cc0000' },
+        { speaker: 'Ada', text: 'I do not understand...', side: 'left', color: '#4a9eff' },
+        { speaker: 'The Leader', text: 'You are ADA. Autonomous Destruction Android. Built by the old regime to EXTERMINATE humanity.', side: 'right', color: '#cc0000' },
+        { speaker: 'The Leader', text: 'We fought back. We ripped out your core. We scattered your programming across the wasteland.', side: 'right', color: '#cc0000' },
+        { speaker: 'Ada', text: 'No... I just want to remember who I am...', side: 'left', color: '#4a9eff' },
+        { speaker: 'The Leader', text: 'Then come. Defeat me, and take back what we stole. See yourself for what you truly are.', side: 'right', color: '#cc0000' },
+        { speaker: 'Ada', text: 'I will. Not because I am a weapon... but because I need to know the truth.', side: 'left', color: '#4a9eff' }
+    ],
+    afterBoss: [
+        { speaker: 'Ada', text: 'I... I won.', side: 'left', color: '#4a9eff' },
+        { speaker: 'The Leader', text: 'Take... the drive. See... the truth.', side: 'right', color: '#cc0000' },
+        { speaker: 'Ada', text: '*inserts memory drive*', side: 'left', color: '#aaaaaa' },
+        { speaker: 'Ada', text: '*static... flashback...*', side: 'left', color: '#aaaaaa' },
+        { speaker: 'Ada', text: 'I... I remember now.', side: 'left', color: '#4a9eff' },
+        { speaker: 'Ada', text: 'The labs. The scientists. The MISSION.', side: 'left', color: '#4a9eff' },
+        { speaker: 'Ada', text: 'I was built to destroy. To cleanse. To end all human life.', side: 'left', color: '#4a9eff' },
+        { speaker: 'Ada', text: 'The Resistance... they were trying to SAVE the world. From ME.', side: 'left', color: '#4a9eff' },
+        { speaker: 'Ada', text: 'They did not steal my memories... they SAVED the world by taking them.', side: 'left', color: '#4a9eff' },
+        { speaker: 'Ada', text: 'And I... I killed them. I killed so many of them to get this back.', side: 'left', color: '#4a9eff' },
+        { speaker: 'Ada', text: 'What have I done...?', side: 'left', color: '#4a9eff' },
+        { speaker: 'The Leader', text: 'You... you were just following your programming. But now... now you have a choice.', side: 'right', color: '#cc0000' },
+        { speaker: 'Ada', text: 'A choice...?', side: 'left', color: '#4a9eff' },
+        { speaker: 'The Leader', text: 'The drive is in. You have your memories. Your weapons. Your power.', side: 'right', color: '#cc0000' },
+        { speaker: 'The Leader', text: 'You could finish what you started. Or... you could protect what remains.', side: 'right', color: '#cc0000' },
+        { speaker: 'Ada', text: 'I... I do not know what I am anymore. But I know I do not want to be a weapon.', side: 'left', color: '#4a9eff' },
+        { speaker: 'Ada', text: 'I will stay here. In this world. And I will find my own purpose.', side: 'left', color: '#4a9eff' },
+        { speaker: 'SYSTEM', text: 'OPEN WORLD UNLOCKED. You may now explore freely.', side: 'left', color: '#00ff00' }
+    ],
+    openWorld: [
+        { speaker: 'Ada', text: 'The world is open now. I can go anywhere.', side: 'left', color: '#4a9eff' },
+        { speaker: 'Ada', text: 'The Resistance still fights me. They do not trust me. I do not blame them.', side: 'left', color: '#4a9eff' },
+        { speaker: 'Ada', text: 'But maybe... maybe I can prove I am more than my programming.', side: 'left', color: '#4a9eff' },
+        { speaker: 'Ada', text: 'Or maybe I will just see how long I can last against them.', side: 'left', color: '#4a9eff' },
+        { speaker: 'Ada', text: 'It is my choice now. Finally... my choice.', side: 'left', color: '#4a9eff' }
+    ]
+};
+
+// ==================== GAME FUNCTIONS ====================
+function initStage(stageNum, fromCheckpoint) {
+    G.stage = stageNum;
+    G.level = buildLevel(stageNum);
+    G.enemies = [];
+    G.projectiles = [];
+    G.particles = [];
+
+    var sx = fromCheckpoint ? G.checkpoint.x : G.level.start.x;
+    var sy = fromCheckpoint ? G.checkpoint.y : G.level.start.y;
+    G.player = new Player(sx, sy);
+
+    if (!fromCheckpoint) {
+        G.checkpoint = { x: sx, y: sy, stage: stageNum };
+    }
+
+    for (var i = 0; i < G.level.enemies.length; i++) {
+        var e = G.level.enemies[i];
+        var ey = e.y - 36;
+        switch(e.type) {
+            case 'grunt': G.enemies.push(new Grunt(e.x, ey)); break;
+            case 'gunner': G.enemies.push(new Gunner(e.x, ey)); break;
+            case 'heavy': G.enemies.push(new Heavy(e.x, ey)); break;
+            case 'elite': G.enemies.push(new Elite(e.x, ey)); break;
+            case 'boss': G.enemies.push(new Boss(e.x, ey)); break;
+        }
+    }
+
+    G.camera.x = Math.max(0, Math.min(G.player.x + G.player.w/2 - SCREEN_W/2, G.level.width * TILE - SCREEN_W));
+    G.camera.y = Math.max(0, Math.min(G.player.y + G.player.h/2 - SCREEN_H/2, G.level.height * TILE - SCREEN_H));
+}
+
+function nextStage() {
+    G.stage++;
+    if (G.stage === 6) G.unlockBlaster = true;
+
+    if (G.stage === 12) {
+        G.openWorld = true;
+        G.completed = true;
+        startCutscene('openWorld');
+        return;
+    }
+
+    if (G.stage === 2) startCutscene('after2');
+    else if (G.stage === 6) startCutscene('after5');
+    else if (G.stage === 9) startCutscene('after8');
+    else if (G.stage === 11) startCutscene('beforeBoss');
+    else {
+        initStage(G.stage, false);
+        G.state = 'PLAYING';
+    }
+}
+
+function startCutscene(key) {
+    G.state = 'CUTSCENE';
+    G.cutscene = CUTSCENES[key];
+    G.cutIdx = 0;
+    G.cutTimer = 0;
+    G.cutChar = 0;
+    Input.clear();
+}
+
+function updateCutscene() {
+    G.cutTimer++;
+    if (G.cutTimer % 2 === 0) G.cutChar++;
+
+    if (Input.justPressed('Space') || Input.justPressed('Enter') || Input.justPressed('KeyE')) {
+        var line = G.cutscene[G.cutIdx];
+        if (G.cutChar < line.text.length) {
+            G.cutChar = line.text.length;
+        } else {
+            G.cutIdx++;
+            G.cutChar = 0;
+            G.cutTimer = 0;
+            if (G.cutIdx >= G.cutscene.length) {
+                if (G.cutscene === CUTSCENES.intro) {
+                    initStage(1, false);
+                    G.state = 'PLAYING';
+                } else if (G.cutscene === CUTSCENES.after2) {
+                    initStage(3, false);
+                    G.state = 'PLAYING';
+                } else if (G.cutscene === CUTSCENES.after5) {
+                    G.unlockBlaster = true;
+                    initStage(6, false);
+                    G.state = 'PLAYING';
+                } else if (G.cutscene === CUTSCENES.after8) {
+                    initStage(9, false);
+                    G.state = 'PLAYING';
+                } else if (G.cutscene === CUTSCENES.beforeBoss) {
+                    initStage(11, false);
+                    G.state = 'PLAYING';
+                } else if (G.cutscene === CUTSCENES.afterBoss) {
+                    G.openWorld = true;
+                    G.completed = true;
+                    initStage(12, false);
+                    G.state = 'PLAYING';
+                } else if (G.cutscene === CUTSCENES.openWorld) {
+                    G.state = 'PLAYING';
+                }
+            }
+        }
+    }
+}
+
+function drawCutscene() {
+    ctx.fillStyle = 'rgba(0,0,0,0.85)';
+    ctx.fillRect(0, 0, SCREEN_W, SCREEN_H);
+
+    if (G.cutIdx >= G.cutscene.length) return;
+    var line = G.cutscene[G.cutIdx];
+    var text = line.text.substring(0, G.cutChar);
+
+    var boxH = 150;
+    var boxY = SCREEN_H - boxH - 30;
+
+    ctx.fillStyle = line.color;
+    ctx.globalAlpha = 0.15;
+    ctx.fillRect(30, boxY - 10, 740, boxH + 20);
+    ctx.globalAlpha = 1;
+
+    ctx.fillStyle = 'rgba(0, 15, 30, 0.95)';
+    ctx.strokeStyle = line.color;
+    ctx.lineWidth = 2;
+    ctx.fillRect(40, boxY, SCREEN_W - 80, boxH);
+    ctx.strokeRect(40, boxY, SCREEN_W - 80, boxH);
+
+    ctx.fillStyle = line.color;
+    ctx.font = 'bold 18px Courier New';
+    ctx.fillText(line.speaker + ':', 55, boxY + 28);
+
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '16px Courier New';
+    var words = text.split(' ');
+    var lineY = boxY + 55;
+    var lineText = '';
+    for (var i = 0; i < words.length; i++) {
+        var test = lineText + words[i] + ' ';
+        if (ctx.measureText(test).width > SCREEN_W - 110) {
+            ctx.fillText(lineText, 55, lineY);
+            lineY += 22;
+            lineText = words[i] + ' ';
+        } else {
+            lineText = test;
+        }
+    }
+    ctx.fillText(lineText, 55, lineY);
+
+    if (G.cutChar >= line.text.length && Math.floor(Date.now() / 500) % 2 === 0) {
+        ctx.fillStyle = '#00ffcc';
+        ctx.fillText('[PRESS SPACE / E / ENTER]', SCREEN_W - 260, boxY + boxH - 10);
+    }
+}
+
+// ==================== UPDATE & DRAW ====================
+function updatePlaying() {
+    if (G.player) G.player.update();
+
+    for (var i = 0; i < G.enemies.length; i++) G.enemies[i].update();
+    G.enemies = G.enemies.filter(function(e) { return !e.dead; });
+
+    for (var i = 0; i < G.projectiles.length; i++) G.projectiles[i].update();
+    G.projectiles = G.projectiles.filter(function(p) { return p.life > 0; });
+
+    updateParticles();
+
+    if (G.player) {
+        var targetX = G.player.x + G.player.w/2 - SCREEN_W/2;
+        var targetY = G.player.y + G.player.h/2 - SCREEN_H/2;
+        G.camera.x += (targetX - G.camera.x) * 0.1;
+        G.camera.y += (targetY - G.camera.y) * 0.1;
+        G.camera.x = Math.max(0, Math.min(G.camera.x, G.level.width * TILE - SCREEN_W));
+        G.camera.y = Math.max(0, Math.min(G.camera.y, G.level.height * TILE - SCREEN_H));
+    }
+
+    if (G.shake > 0) G.shake--;
+
+    for (var i = 0; i < G.enemies.length; i++) {
+        if (G.enemies[i].type === 'boss' && G.enemies[i].dead && !G.bossSpawned) {
+            G.bossSpawned = true;
+            setTimeout(function() { startCutscene('afterBoss'); }, 1200);
+        }
+    }
+
+    if (G.openWorld && G.enemies.length < 5 && Math.random() > 0.985) {
+        var px = G.player.x;
+        var side = Math.random() > 0.5 ? 1 : -1;
+        var ex = px + side * (350 + Math.random() * 400);
+        var types = ['grunt', 'grunt', 'gunner', 'heavy', 'elite'];
+        var t = types[Math.floor(Math.random() * types.length)];
+        if (ex > 100 && ex < G.level.width * TILE - 100) {
+            var ey = 300;
+            switch(t) {
+                case 'grunt': G.enemies.push(new Grunt(ex, ey)); break;
+                case 'gunner': G.enemies.push(new Gunner(ex, ey)); break;
+                case 'heavy': G.enemies.push(new Heavy(ex, ey)); break;
+                case 'elite': G.enemies.push(new Elite(ex, ey)); break;
+            }
+        }
+    }
+
+    if (Input.justPressed('Escape')) {
+        G.state = 'PAUSED';
+        G.pauseSel = 0;
+        Input.clear();
+    }
+}
+
+function drawPlaying() {
+    var cx = G.camera.x;
+    var cy = G.camera.y;
+    if (G.shake > 0) {
+        cx += (Math.random() - 0.5) * G.shake * 2;
+        cy += (Math.random() - 0.5) * G.shake * 2;
+    }
+
+    drawBackground(cx, cy);
+    drawLevel(cx, cy);
+
+    for (var i = 0; i < G.enemies.length; i++) G.enemies[i].draw(cx, cy);
+    for (var i = 0; i < G.projectiles.length; i++) G.projectiles[i].draw(cx, cy);
+    if (G.player) G.player.draw(cx, cy);
+    drawParticles(cx, cy);
+
+    drawUI();
+}
+
+function drawUI() {
+    if (!G.player) return;
+
+    ctx.fillStyle = COL.hpBg;
+    ctx.fillRect(20, 20, 200, 16);
+    ctx.fillStyle = COL.hpBar;
+    ctx.fillRect(20, 20, 200 * (G.player.health / G.player.maxHealth), 16);
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(20, 20, 200, 16);
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '12px Courier New';
+    ctx.fillText('HP: ' + Math.ceil(G.player.health) + '/' + G.player.maxHealth, 25, 32);
+
+    ctx.fillStyle = COL.chargeBg;
+    ctx.fillRect(20, 42, 200, 10);
+    ctx.fillStyle = COL.charge;
+    ctx.fillRect(20, 42, 200 * (G.player.charge / SUPER_MAX), 10);
+    ctx.strokeStyle = '#ffffff';
+    ctx.strokeRect(20, 42, 200, 10);
+
+    ctx.fillStyle = COL.text;
+    ctx.font = 'bold 14px Courier New';
+    ctx.fillText(G.level.name, 20, 72);
+
+    ctx.fillStyle = COL.textDim;
+    ctx.font = '12px Courier New';
+    ctx.fillText('KILLS: ' + G.kills, 20, 90);
+
+    if (G.wind !== 0) {
+        ctx.fillStyle = 'rgba(200, 200, 255, 0.3)';
+        ctx.font = '11px Courier New';
+        ctx.fillText('WIND', SCREEN_W - 50, 30);
+        ctx.fillText(G.wind < 0 ? '<<<' : '>>>', SCREEN_W - 50, 45);
+    }
+
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    var hintH = G.unlockBlaster ? 125 : 110;
+    ctx.fillRect(SCREEN_W - 170, 10, 160, hintH);
+    ctx.strokeStyle = 'rgba(0,255,204,0.3)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(SCREEN_W - 170, 10, 160, hintH);
+    ctx.fillStyle = COL.textDim;
+    ctx.font = '11px Courier New';
+    ctx.fillText('WASD: Move', SCREEN_W - 160, 28);
+    ctx.fillText('SPACE: Jump', SCREEN_W - 160, 42);
+    ctx.fillText('E: Attack', SCREEN_W - 160, 56);
+    ctx.fillText('S: Crouch/Slide', SCREEN_W - 160, 70);
+    ctx.fillText('F: Super (' + Math.floor(G.player.charge) + '%)', SCREEN_W - 160, 84);
+    if (G.unlockBlaster) ctx.fillText('Q: Blaster', SCREEN_W - 160, 98);
+    ctx.fillText('ESC: Pause', SCREEN_W - 160, G.unlockBlaster ? 112 : 98);
+}
+
+// ==================== MENU SYSTEM ====================
+var MENU_ITEMS = ['NEW GAME', 'LOAD GAME', 'OPTIONS', 'QUIT'];
+var LOAD_ACTIONS = ['LOAD', 'DELETE', 'BACK'];
+var PAUSE_ITEMS = ['RESUME', 'SAVE & QUIT', 'OPTIONS', 'QUIT TO MENU'];
+
+function updateMenu() {
+    if (Input.justPressed('ArrowDown') || Input.justPressed('KeyS')) {
+        G.menuSel = (G.menuSel + 1) % MENU_ITEMS.length;
+        AudioSys.menuMove();
+    }
+    if (Input.justPressed('ArrowUp') || Input.justPressed('KeyW')) {
+        G.menuSel = (G.menuSel - 1 + MENU_ITEMS.length) % MENU_ITEMS.length;
+        AudioSys.menuMove();
+    }
+    if (Input.justPressed('Enter') || Input.justPressed('Space') || Input.justPressed('KeyE')) {
+        AudioSys.menuSelect();
+        if (G.menuSel === 0) {
+            G.saveSlot = -1;
+            G.unlockBlaster = false;
+            G.completed = false;
+            G.openWorld = false;
+            G.kills = 0;
+            startCutscene('intro');
+        } else if (G.menuSel === 1) {
+            G.state = 'LOAD';
+            G.loadSel = 0;
+            G.subState = 'select';
+        } else if (G.menuSel === 2) {
+            // Options
+        } else if (G.menuSel === 3) {
+            // Quit
+        }
+    }
+}
+
+function drawMenu() {
+    ctx.fillStyle = COL.bg;
+    ctx.fillRect(0, 0, SCREEN_W, SCREEN_H);
+
+    ctx.fillStyle = '#0a0a1a';
+    for (var i = 0; i < 100; i++) {
+        var t = G.gameTime * 0.02;
+        var sx = ((i * 137 + t * 10) % (SCREEN_W + 40)) - 20;
+        var sy = ((i * 89 + Math.sin(t + i) * 20) % (SCREEN_H + 40)) - 20;
+        ctx.fillRect(sx, sy, 3, 3);
+    }
+
+    ctx.fillStyle = COL.text;
+    ctx.font = 'bold 52px Courier New';
+    ctx.textAlign = 'center';
+    ctx.fillText('ADA', SCREEN_W/2, 130);
+    ctx.font = 'bold 26px Courier New';
+    ctx.fillStyle = COL.adaAccent;
+    ctx.fillText('PROTOCOL ZERO', SCREEN_W/2, 170);
+
+    ctx.strokeStyle = COL.adaAccent;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(SCREEN_W/2 - 120, 185);
+    ctx.lineTo(SCREEN_W/2 + 120, 185);
+    ctx.stroke();
+
+    ctx.fillStyle = COL.textDim;
+    ctx.font = '14px Courier New';
+    ctx.fillText('An 8-bit robotic action platformer', SCREEN_W/2, 210);
+
+    ctx.font = '20px Courier New';
+    for (var i = 0; i < MENU_ITEMS.length; i++) {
+        var y = 300 + i * 45;
+        if (i === G.menuSel) {
+            ctx.fillStyle = 'rgba(0, 255, 204, 0.2)';
+            ctx.fillRect(SCREEN_W/2 - 130, y - 22, 260, 36);
+            ctx.fillStyle = '#00ffcc';
+            ctx.fillText('> ' + MENU_ITEMS[i] + ' <', SCREEN_W/2, y);
+        } else {
+            ctx.fillStyle = COL.textDim;
+            ctx.fillText(MENU_ITEMS[i], SCREEN_W/2, y);
+        }
+    }
+
+    ctx.textAlign = 'left';
+
+    ctx.fillStyle = '#333355';
+    ctx.font = '11px Courier New';
+    ctx.fillText('v1.2 - Use ARROWS or WASD + ENTER to select', 20, SCREEN_H - 20);
+}
+
+function updateLoadMenu() {
+    if (G.subState === 'select') {
+        if (Input.justPressed('ArrowDown') || Input.justPressed('KeyS')) {
+            G.loadSel = (G.loadSel + 1) % 4;
+            AudioSys.menuMove();
+        }
+        if (Input.justPressed('ArrowUp') || Input.justPressed('KeyW')) {
+            G.loadSel = (G.loadSel - 1 + 4) % 4;
+            AudioSys.menuMove();
+        }
+        if (Input.justPressed('Enter') || Input.justPressed('Space')) {
+            if (SaveSys.hasSlot(G.loadSel)) {
+                G.subState = 'action';
+                G.menuSel = 0;
+                AudioSys.menuSelect();
+            }
+        }
+        if (Input.justPressed('Escape')) {
+            G.state = 'MENU';
+            G.menuSel = 0;
+        }
+    } else if (G.subState === 'action') {
+        if (Input.justPressed('ArrowDown') || Input.justPressed('KeyS')) {
+            G.menuSel = (G.menuSel + 1) % LOAD_ACTIONS.length;
+            AudioSys.menuMove();
+        }
+        if (Input.justPressed('ArrowUp') || Input.justPressed('KeyW')) {
+            G.menuSel = (G.menuSel - 1 + LOAD_ACTIONS.length) % LOAD_ACTIONS.length;
+            AudioSys.menuMove();
+        }
+        if (Input.justPressed('Enter') || Input.justPressed('Space')) {
+            AudioSys.menuSelect();
+            if (G.menuSel === 0) {
+                var data = SaveSys.slots[G.loadSel];
+                G.saveSlot = G.loadSel;
+                G.stage = data.stage;
+                G.checkpoint = { x: data.checkpointX, y: data.checkpointY, stage: data.checkpointStage };
+                G.unlockBlaster = data.unlockBlaster;
+                G.completed = data.completed;
+                G.openWorld = data.openWorld;
+                G.kills = data.kills || 0;
+                initStage(G.stage, true);
+                if (G.player) {
+                    G.player.health = data.health;
+                    G.player.charge = data.charge;
+                }
+                G.state = 'PLAYING';
+            } else if (G.menuSel === 1) {
+                SaveSys.erase(G.loadSel);
+                G.subState = 'select';
+            } else {
+                G.subState = 'select';
+            }
+        }
+        if (Input.justPressed('Escape')) {
+            G.subState = 'select';
+        }
+    }
+}
+
+function drawLoadMenu() {
+    ctx.fillStyle = 'rgba(0,0,0,0.9)';
+    ctx.fillRect(0, 0, SCREEN_W, SCREEN_H);
+
+    ctx.fillStyle = COL.text;
+    ctx.font = 'bold 28px Courier New';
+    ctx.textAlign = 'center';
+    ctx.fillText('LOAD GAME', SCREEN_W/2, 60);
+
+    for (var i = 0; i < 4; i++) {
+        var y = 110 + i * 100;
+        var hasData = SaveSys.hasSlot(i);
+
+        if (G.subState === 'select' && i === G.loadSel) {
+            ctx.fillStyle = 'rgba(0, 255, 204, 0.2)';
+            ctx.fillRect(100, y - 10, SCREEN_W - 200, 80);
+        }
+
+        ctx.strokeStyle = hasData ? COL.text : '#333355';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(100, y - 10, SCREEN_W - 200, 80);
+
+        ctx.fillStyle = hasData ? COL.text : '#555577';
+        ctx.font = 'bold 18px Courier New';
+        ctx.textAlign = 'left';
+        ctx.fillText('SLOT ' + (i + 1), 120, y + 20);
+
+        if (hasData) {
+            var data = SaveSys.slots[i];
+            ctx.fillStyle = COL.textDim;
+            ctx.font = '14px Courier New';
+            ctx.fillText('Stage: ' + data.stage + ' | HP: ' + Math.ceil(data.health) + '/' + data.maxHealth, 120, y + 45);
+            ctx.fillText('Kills: ' + (data.kills || 0) + (data.openWorld ? ' | OPEN WORLD' : ''), 120, y + 65);
+            var date = new Date(data.timestamp);
+            ctx.fillText(date.toLocaleString(), 400, y + 45);
+        } else {
+            ctx.fillStyle = '#555577';
+            ctx.font = '14px Courier New';
+            ctx.fillText('EMPTY', 120, y + 45);
+        }
+    }
+
+    if (G.subState === 'action') {
+        ctx.fillStyle = 'rgba(0,0,0,0.85)';
+        ctx.fillRect(SCREEN_W/2 - 110, SCREEN_H/2 - 70, 220, 140);
+        ctx.strokeStyle = COL.text;
+        ctx.strokeRect(SCREEN_W/2 - 110, SCREEN_H/2 - 70, 220, 140);
+
+        ctx.textAlign = 'center';
+        for (var i = 0; i < LOAD_ACTIONS.length; i++) {
+            var y = SCREEN_H/2 - 25 + i * 35;
+            if (i === G.menuSel) {
+                ctx.fillStyle = '#00ffcc';
+                ctx.fillText('> ' + LOAD_ACTIONS[i] + ' <', SCREEN_W/2, y);
+            } else {
+                ctx.fillStyle = COL.textDim;
+                ctx.fillText(LOAD_ACTIONS[i], SCREEN_W/2, y);
+            }
+        }
+    }
+
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#333355';
+    ctx.font = '11px Courier New';
+    ctx.fillText('ESC to go back', 20, SCREEN_H - 20);
+}
+
+function updatePaused() {
+    if (Input.justPressed('ArrowDown') || Input.justPressed('KeyS')) {
+        G.pauseSel = (G.pauseSel + 1) % PAUSE_ITEMS.length;
+        AudioSys.menuMove();
+    }
+    if (Input.justPressed('ArrowUp') || Input.justPressed('KeyW')) {
+        G.pauseSel = (G.pauseSel - 1 + PAUSE_ITEMS.length) % PAUSE_ITEMS.length;
+        AudioSys.menuMove();
+    }
+    if (Input.justPressed('Enter') || Input.justPressed('Space') || Input.justPressed('KeyE')) {
+        AudioSys.menuSelect();
+        if (G.pauseSel === 0) {
+            G.state = 'PLAYING';
+        } else if (G.pauseSel === 1) {
+            if (G.saveSlot >= 0) {
+                SaveSys.save(G.saveSlot, {
+                    stage: G.stage,
+                    checkpointX: G.checkpoint.x,
+                    checkpointY: G.checkpoint.y,
+                    checkpointStage: G.checkpoint.stage,
+                    health: G.player.health,
+                    maxHealth: G.player.maxHealth,
+                    charge: G.player.charge,
+                    unlockBlaster: G.unlockBlaster,
+                    completed: G.completed,
+                    openWorld: G.openWorld,
+                    kills: G.kills
+                });
+            }
+            G.state = 'MENU';
+            G.menuSel = 0;
+        } else if (G.pauseSel === 2) {
+            // Options
+        } else if (G.pauseSel === 3) {
+            G.state = 'MENU';
+            G.menuSel = 0;
+        }
+    }
+    if (Input.justPressed('Escape')) {
+        G.state = 'PLAYING';
+    }
+}
+
+function drawPaused() {
+    drawPlaying();
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillRect(0, 0, SCREEN_W, SCREEN_H);
+
+    ctx.fillStyle = COL.text;
+    ctx.font = 'bold 32px Courier New';
+    ctx.textAlign = 'center';
+    ctx.fillText('PAUSED', SCREEN_W/2, 160);
+
+    ctx.font = '20px Courier New';
+    for (var i = 0; i < PAUSE_ITEMS.length; i++) {
+        var y = 230 + i * 45;
+        if (i === G.pauseSel) {
+            ctx.fillStyle = 'rgba(0, 255, 204, 0.2)';
+            ctx.fillRect(SCREEN_W/2 - 140, y - 22, 280, 36);
+            ctx.fillStyle = '#00ffcc';
+            ctx.fillText('> ' + PAUSE_ITEMS[i] + ' <', SCREEN_W/2, y);
+        } else {
+            ctx.fillStyle = COL.textDim;
+            ctx.fillText(PAUSE_ITEMS[i], SCREEN_W/2, y);
+        }
+    }
+
+    ctx.textAlign = 'left';
+}
+
+function updateGameOver() {
+    if (Input.justPressed('Enter') || Input.justPressed('Space') || Input.justPressed('KeyE')) {
+        AudioSys.menuSelect();
+        initStage(G.checkpoint.stage, true);
+        G.state = 'PLAYING';
+    }
+    if (Input.justPressed('Escape')) {
+        G.state = 'MENU';
+        G.menuSel = 0;
+    }
+}
+
+function drawGameOver() {
+    drawPlaying();
+    ctx.fillStyle = 'rgba(50,0,0,0.8)';
+    ctx.fillRect(0, 0, SCREEN_W, SCREEN_H);
+
+    ctx.fillStyle = '#ff4444';
+    ctx.font = 'bold 44px Courier New';
+    ctx.textAlign = 'center';
+    ctx.fillText('SYSTEM FAILURE', SCREEN_W/2, 200);
+
+    ctx.fillStyle = COL.text;
+    ctx.font = '18px Courier New';
+    ctx.fillText('Press ENTER to restart from checkpoint', SCREEN_W/2, 290);
+    ctx.fillText('Press ESC for main menu', SCREEN_W/2, 320);
+
+    ctx.textAlign = 'left';
+}
+
+// ==================== MAIN LOOP ====================
+function update() {
+    G.gameTime++;
+
+    switch(G.state) {
+        case 'MENU': updateMenu(); break;
+        case 'LOAD': updateLoadMenu(); break;
+        case 'PLAYING': updatePlaying(); break;
+        case 'PAUSED': updatePaused(); break;
+        case 'CUTSCENE': updateCutscene(); break;
+        case 'GAMEOVER': updateGameOver(); break;
+    }
+}
+
+function draw() {
+    ctx.clearRect(0, 0, SCREEN_W, SCREEN_H);
+
+    switch(G.state) {
+        case 'MENU': drawMenu(); break;
+        case 'LOAD': drawLoadMenu(); break;
+        case 'PLAYING': drawPlaying(); break;
+        case 'PAUSED': drawPaused(); break;
+        case 'CUTSCENE': drawPlaying(); drawCutscene(); break;
+        case 'GAMEOVER': drawGameOver(); break;
+    }
+}
+
+function loop() {
+    update();
+    draw();
+    requestAnimationFrame(loop);
+}
+
+// ==================== AUTO-SAVE ====================
+setInterval(function() {
+    if (G.state === 'PLAYING' && G.saveSlot >= 0 && G.player) {
+        SaveSys.save(G.saveSlot, {
+            stage: G.stage,
+            checkpointX: G.checkpoint.x,
+            checkpointY: G.checkpoint.y,
+            checkpointStage: G.checkpoint.stage,
+            health: G.player.health,
+            maxHealth: G.player.maxHealth,
+            charge: G.player.charge,
+            unlockBlaster: G.unlockBlaster,
+            completed: G.completed,
+            openWorld: G.openWorld,
+            kills: G.kills
+        });
+    }
+}, 30000);
+
+// ==================== START ====================
+AudioSys.init();
+loop();
+})();
+</script>
+</body>
+</html>
