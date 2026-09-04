@@ -1,0 +1,602 @@
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Video Launcher</title>
+
+<style>
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    background: #080808;
+    color: white;
+    font-family: Arial, sans-serif;
+}
+
+.launcher {
+    min-height: 100vh;
+    max-width: 900px;
+    margin: auto;
+    padding: 40px 25px;
+}
+
+h1 {
+    font-size: 32px;
+    margin-bottom: 25px;
+}
+
+.top-buttons {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 35px;
+}
+
+.main-button {
+    background: white;
+    color: black;
+    border: none;
+    padding: 14px 25px;
+    border-radius: 9px;
+    font-size: 16px;
+    font-weight: bold;
+    cursor: pointer;
+}
+
+.main-button:hover {
+    background: #ddd;
+}
+
+.bookmark-section {
+    background: #111;
+    border: 1px solid #252525;
+    border-radius: 14px;
+    padding: 20px;
+}
+
+.bookmark-section h2 {
+    margin-top: 0;
+}
+
+#bookmarks {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.bookmark {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: #181818;
+    border-radius: 9px;
+    padding: 13px 15px;
+    gap: 10px;
+}
+
+.bookmark-info {
+    cursor: pointer;
+    flex: 1;
+}
+
+.bookmark-name {
+    font-weight: bold;
+    font-size: 16px;
+}
+
+.bookmark-id {
+    color: #888;
+    font-size: 13px;
+    margin-top: 4px;
+}
+
+.delete-button {
+    background: #292929;
+    color: white;
+    border: none;
+    border-radius: 7px;
+    padding: 9px 12px;
+    cursor: pointer;
+}
+
+.delete-button:hover {
+    background: #444;
+}
+
+.empty {
+    color: #777;
+    padding: 10px 0;
+}
+
+/* PLAYER PAGE */
+
+.player-page {
+    background: #080808;
+    min-height: 100vh;
+    color: white;
+    font-family: Arial, sans-serif;
+    padding: 25px;
+}
+
+.player-container {
+    max-width: 1200px;
+    margin: auto;
+}
+
+.player {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    background: black;
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+iframe {
+    width: 100%;
+    height: 100%;
+    border: none;
+}
+
+.controls {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-top: 15px;
+}
+
+.control-group {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+}
+
+input,
+button {
+    background: #181818;
+    color: white;
+    border: 1px solid #333;
+    border-radius: 8px;
+    padding: 11px 13px;
+    font-size: 15px;
+}
+
+input {
+    width: 90px;
+}
+
+button {
+    cursor: pointer;
+}
+
+button:hover {
+    background: #292929;
+}
+
+.fullscreen {
+    margin-left: auto;
+}
+
+@media (max-width: 600px) {
+    .fullscreen {
+        margin-left: 0;
+    }
+}
+</style>
+</head>
+
+<body>
+
+<div class="launcher">
+
+    <h1>Video Launcher</h1>
+
+    <div class="top-buttons">
+
+        <button class="main-button" onclick="launchFromPrompt()">
+            ▶ Launch
+        </button>
+
+        <button class="main-button" onclick="addBookmark()">
+            🔖 Add Bookmark
+        </button>
+
+    </div>
+
+    <div class="bookmark-section">
+
+        <h2>🔖 Bookmarks</h2>
+
+        <div id="bookmarks"></div>
+
+    </div>
+
+</div>
+
+
+<script>
+
+/* =========================
+   BOOKMARK SYSTEM
+========================= */
+
+let bookmarks = JSON.parse(
+    localStorage.getItem("videoBookmarks") || "[]"
+);
+
+function saveBookmarks() {
+    localStorage.setItem(
+        "videoBookmarks",
+        JSON.stringify(bookmarks)
+    );
+}
+
+function addBookmark() {
+
+    const name = prompt("Enter a name for this bookmark:");
+
+    if (!name) return;
+
+    const id = prompt("Enter the IMDb ID:");
+
+    if (!id) return;
+
+    bookmarks.push({
+        name: name,
+        id: id
+    });
+
+    saveBookmarks();
+
+    displayBookmarks();
+}
+
+
+function deleteBookmark(index) {
+
+    if (!confirm("Delete this bookmark?")) return;
+
+    bookmarks.splice(index, 1);
+
+    saveBookmarks();
+
+    displayBookmarks();
+}
+
+
+function displayBookmarks() {
+
+    const container = document.getElementById("bookmarks");
+
+    container.innerHTML = "";
+
+    if (bookmarks.length === 0) {
+
+        container.innerHTML =
+            '<div class="empty">No bookmarks yet.</div>';
+
+        return;
+    }
+
+    bookmarks.forEach((bookmark, index) => {
+
+        const item = document.createElement("div");
+
+        item.className = "bookmark";
+
+        item.innerHTML = `
+            <div class="bookmark-info">
+                <div class="bookmark-name">
+                    ${escapeHTML(bookmark.name)}
+                </div>
+
+                <div class="bookmark-id">
+                    ${escapeHTML(bookmark.id)}
+                </div>
+            </div>
+
+            <button class="delete-button">
+                🗑️
+            </button>
+        `;
+
+        item.querySelector(".bookmark-info")
+            .addEventListener("click", () => {
+                openPlayer(bookmark.id);
+            });
+
+        item.querySelector(".delete-button")
+            .addEventListener("click", () => {
+                deleteBookmark(index);
+            });
+
+        container.appendChild(item);
+    });
+}
+
+
+function escapeHTML(text) {
+
+    const div = document.createElement("div");
+
+    div.textContent = text;
+
+    return div.innerHTML;
+}
+
+
+/* =========================
+   LAUNCH
+========================= */
+
+function launchFromPrompt() {
+
+    const id = prompt("Enter the IMDb ID:");
+
+    if (!id) return;
+
+    openPlayer(id);
+}
+
+
+/* =========================
+   OPEN ABOUT:BLANK PLAYER
+========================= */
+
+function openPlayer(id) {
+
+    const newTab = window.open("about:blank", "_blank");
+
+    if (!newTab) {
+
+        alert(
+            "The new tab was blocked. Please allow pop-ups for this site."
+        );
+
+        return;
+    }
+
+    newTab.document.open();
+
+    newTab.document.write(`
+
+<!DOCTYPE html>
+
+<html lang="en">
+
+<head>
+
+<meta charset="UTF-8">
+
+<meta name="viewport"
+content="width=device-width, initial-scale=1.0">
+
+<title>Video Player</title>
+
+<style>
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    background: #080808;
+    color: white;
+    font-family: Arial, sans-serif;
+}
+
+.container {
+    max-width: 1200px;
+    margin: auto;
+    padding: 25px;
+}
+
+h1 {
+    margin-bottom: 20px;
+}
+
+.player {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    background: black;
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+iframe {
+    width: 100%;
+    height: 100%;
+    border: none;
+}
+
+.controls {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-top: 15px;
+}
+
+.control-group {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+}
+
+input,
+button {
+    background: #181818;
+    color: white;
+    border: 1px solid #333;
+    border-radius: 8px;
+    padding: 11px 13px;
+    font-size: 15px;
+}
+
+input {
+    width: 85px;
+}
+
+button {
+    cursor: pointer;
+}
+
+button:hover {
+    background: #292929;
+}
+
+.fullscreen {
+    margin-left: auto;
+}
+
+@media (max-width: 600px) {
+
+    .fullscreen {
+        margin-left: 0;
+    }
+
+}
+
+</style>
+
+</head>
+
+<body>
+
+<div class="container">
+
+    <h1>Video Player</h1>
+
+    <div class="player" id="player">
+
+        <iframe
+            id="videoFrame"
+            src="https://vidsrc.mov/embed/tv/${encodeURIComponent(id)}/1/1"
+            allowfullscreen>
+        </iframe>
+
+    </div>
+
+
+    <div class="controls">
+
+        <div class="control-group">
+
+            <label>Season</label>
+
+            <input
+                id="season"
+                type="number"
+                min="1"
+                value="1">
+
+        </div>
+
+
+        <div class="control-group">
+
+            <label>Episode</label>
+
+            <input
+                id="episode"
+                type="number"
+                min="1"
+                value="1">
+
+        </div>
+
+
+        <button onclick="updateVideo()">
+            ▶ Load Episode
+        </button>
+
+
+        <button
+            class="fullscreen"
+            onclick="fullscreenPlayer()">
+
+            ⛶ Fullscreen
+
+        </button>
+
+    </div>
+
+</div>
+
+
+<script>
+
+const movieID = ${JSON.stringify(id)};
+
+const frame =
+    document.getElementById("videoFrame");
+
+
+function updateVideo() {
+
+    const season =
+        document.getElementById("season").value;
+
+    const episode =
+        document.getElementById("episode").value;
+
+    if (!season || !episode) {
+
+        alert("Enter both a season and episode.");
+
+        return;
+    }
+
+    frame.src =
+        "https://vidsrc.mov/embed/tv/" +
+        encodeURIComponent(movieID) +
+        "/" +
+        season +
+        "/" +
+        episode;
+}
+
+
+function fullscreenPlayer() {
+
+    const player =
+        document.getElementById("player");
+
+    if (player.requestFullscreen) {
+
+        player.requestFullscreen();
+
+    } else if (player.webkitRequestFullscreen) {
+
+        player.webkitRequestFullscreen();
+
+    }
+
+}
+
+<\/script>
+
+</body>
+
+</html>
+
+    `);
+
+    newTab.document.close();
+}
+
+
+/* Load saved bookmarks when page opens */
+displayBookmarks();
+
+</script>
+
+</body>
+</html>
+```
